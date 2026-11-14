@@ -102,15 +102,23 @@ does not depend on them. Both use four cells:
 
 | Cell | Action |
 | --- | --- |
-| Settings | Define repository/branch, runtime project path, `DRIVE_DATA_ROOT`, model/cache/result paths, endpoint, and `HF_HUB_OFFLINE=1`; export environment settings before HF imports; builds also define `BUILD_OUTPUT_PATH` |
+| Settings | Define repository/branch, runtime project path, `DRIVE_DATA_ROOT`, `DRIVE_SCRIPTS_DIR`, model/cache/result paths, endpoint, and `HF_HUB_OFFLINE=1`; export environment settings before HF imports; builds also define `BUILD_OUTPUT_PATH` |
 | Drive | Mount `/content/drive` and create the model-cache directory |
 | Setup | Clone, or fetch and hard-reset the runtime checkout to the selected remote branch; write model/cache/result paths, endpoint, and `HF_HUB_OFFLINE=1` to runtime `.env`; install `uv`; synchronize dependencies |
-| Run and cleanup | Validation runs `scripts/validate.py --data-source-root DRIVE_DATA_ROOT`, then flushes/unmounts Drive and requests runtime release in `finally`; builds run `scripts/build.py --data-source-root DRIVE_DATA_ROOT`, save SR2 build outputs, then perform cleanup |
+| Run and cleanup | First synchronize scripts from Drive; validation then runs `scripts/validate.py --data-source-root DRIVE_DATA_ROOT`, flushes/unmounts Drive and requests runtime release in `finally`; builds run `scripts/build.py --data-source-root DRIVE_DATA_ROOT`, save SR2 build outputs, then perform cleanup |
 
 The setup cell's `git reset --hard` discards tracked edits in the **runtime
 checkout**. Preserve those edits before rerunning that cell. It does not upload
 local Windows project changes; the runtime obtains code from the configured
 remote branch.
+
+Before each batch, the final cell recursively copies `DRIVE_SCRIPTS_DIR` (default
+`/content/drive/MyDrive/llm-classification-finetuning/scripts`) into
+`PROJECT_DIR/scripts`. It overwrites same-named files and preserves files that
+exist only in the runtime checkout. Synchronization logs its source, destination,
+and completion. A missing source directory or copy failure stops the cell before
+the batch and its cleanup begin, leaving Drive mounted and the runtime available
+for recovery and retry.
 
 ### How validation and build data is prepared
 
