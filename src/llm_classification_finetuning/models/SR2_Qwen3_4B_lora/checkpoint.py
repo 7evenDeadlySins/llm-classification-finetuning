@@ -1,4 +1,4 @@
-"""Persist portable adapter/head checkpoints and merged backbone exports."""
+"""Persist portable adapter/pooling/head checkpoints and merged backbone exports."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ from ...config import GPUConfig, LoRAModelConfig
 from ...errors import ModelExecutionError
 from .heads import PAIRWISE_MLP, SR2, create_classification_head
 from .model import LoRAQwenClassifier
+from .pooling import LastTokenQueryCrossAttention
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,9 +48,11 @@ class LoRACheckpointCompatibility:
 	lora_dropout: float
 	lora_target_modules: tuple[str, ...]
 	ab_swap: str
-	schema_version: int = 2
+	schema_version: int = 3
 	class_count: int = 3
-	pooling: str = "last-nonpadding-token"
+	pooling: str = LastTokenQueryCrossAttention.ARCHITECTURE
+	cross_attention_dim: int = 256
+	cross_attention_heads: int = 4
 	truncation_side: str = "right"
 	bias: str = "none"
 	training_quantization: str = "none"
@@ -77,6 +80,8 @@ class LoRACheckpointCompatibility:
 			ab_swap=config.ab_swap,
 			training_quantization="bnb-nf4-double" if quantize_training else "none",
 			head_architecture=head_architecture,
+			cross_attention_dim=config.cross_attention_dim,
+			cross_attention_heads=config.cross_attention_heads,
 		)
 
 
@@ -86,6 +91,7 @@ class LoadedLoRACheckpoint:
 
 	adapter_state_dict: dict[str, Tensor]
 	head_state_dict: dict[str, Tensor]
+	pooling_state_dict: dict[str, Tensor]
 	backbone_hidden_size: int
 	base_revision: str | None
 
@@ -130,10 +136,23 @@ class LoRACheckpointStore:
 		"""Reload and validate staged CPU tensors before atomic publication."""
 		temporary_path: Path | None = None
 		try:
+			if model.pooling is None:
+				raise ValueError(
+					"production checkpoints require cross-attention pooling"
+				)
+			if (
+				model.pooling.ARCHITECTURE != compatibility.pooling
+				or model.pooling.heads != compatibility.cross_attention_heads
+				or model.pooling.o_proj.in_features != compatibility.cross_attention_dim
+			):
+				raise ValueError(
+					"model pooling does not match checkpoint compatibility"
+				)
 			adapters = self._cpu_state(
 				get_peft_model_state_dict(model.backbone, save_embedding_layers=False)
 			)
 			head = self._cpu_state(model.classifier.state_dict())
+			pooling = self._cpu_state(model.pooling.state_dict())
 			self.path.parent.mkdir(parents=True, exist_ok=True)
 			with tempfile.NamedTemporaryFile(
 				dir=self.path.parent, prefix=".adapter-", suffix=".tmp.pt", delete=False
@@ -151,11 +170,12 @@ class LoRACheckpointStore:
 					},
 					"adapter_state_dict": adapters,
 					"head_state_dict": head,
+					"pooling_state_dict": pooling,
 				},
 				temporary_path,
 			)
 			# Release the CPU snapshot before loading a second copy for validation.
-			del adapters, head
+			del adapters, head, pooling
 			self._load_checkpoint(temporary_path, compatibility)
 			os.replace(temporary_path, self.path)
 			temporary_path = None
@@ -233,11 +253,32 @@ class LoRACheckpointStore:
 					"classification head tensors do not match the required architecture. "
 					f"Run '{self._build_command}' to rebuild the checkpoint."
 				)
+			pooling_state = self._validate_state(
+				checkpoint.get("pooling_state_dict"), "pooling_state_dict"
+			)
+			with torch.device("meta"):
+				expected_pooling = LastTokenQueryCrossAttention(
+					hidden_size,
+					expected.cross_attention_dim,
+					expected.cross_attention_heads,
+					expected.classifier_dropout,
+					compute_dtype=torch.float32,
+				).state_dict()
+			if pooling_state.keys() != expected_pooling.keys() or any(
+				pooling_state[name].shape != parameter.shape
+				or pooling_state[name].dtype != torch.float32
+				for name, parameter in expected_pooling.items()
+			):
+				raise ValueError(
+					"pooling tensors must match the cross-attention architecture in FP32. "
+					f"Run '{self._build_command}' to rebuild the checkpoint."
+				)
 			return LoadedLoRACheckpoint(
 				self._validate_state(
 					checkpoint.get("adapter_state_dict"), "adapter_state_dict"
 				),
 				head_state,
+				pooling_state,
 				hidden_size,
 				revision,
 			)

@@ -34,7 +34,7 @@ flowchart TD
     Synthetic --> Build
     Validate --> Run["Predictions, metrics, config"]
     Run --> Report["PNG and XLSX report"]
-    Build --> Checkpoint["SR2 adapter/head checkpoint"]
+    Build --> Checkpoint["SR2 adapter/pooling/head checkpoint"]
     Build --> Merged["Merged backbone and tokenizer"]
     Build --> Head["Frozen SR2 head checkpoint"]
 ```
@@ -93,9 +93,11 @@ to the batch script; complete local processed data bypasses that source.
 [submit.ipynb](submit.ipynb) is the tracked, self-contained Kaggle inference notebook (GPU
 T4 x2, Python 3.13+, offline inference after upload-time dependency setup). It sits
 outside the package and the `model` CLI: it reads the build's
-`adapter.pt` head and `merged/` backbone and writes `submission.csv`. It duplicates the
-SR2 v9 head and the conversation serializer, so changes to
-`models/SR2_Qwen3_4B_lora/heads.py` or `models/common/data.py` must be mirrored there.
+`adapter.pt` pooling/head and `merged/` backbone and writes `submission.csv`. It duplicates the
+SR2 v9 head, last-token-query cross-attention, and conversation serializer, so changes to
+`models/SR2_Qwen3_4B_lora/heads.py`, `models/SR2_Qwen3_4B_lora/pooling.py`, or
+`models/common/data.py` must be mirrored there. Full-sequence final RMSNorm
+precedes attention pooling on the final-stage GPU.
 Behavior belongs in [Kaggle submission](docs/kaggle-submission.md).
 
 ## Package map
@@ -186,12 +188,13 @@ default to SR2. Retained legacy quantization/head branches are not active profil
 | `data.py` | Canonical token/feature views, branch flattening, independent right padding, and CPU pooling positions |
 | `batching.py` | CPU loader preparation, shared tokens, global base plans, merged optimizer groups, epoch repacking, warmup training-ID/label identity context, and explicit frozen-head config/full-data preparation |
 | `heads.py` | Head factory, precision wrapper, fused subtractive L/M win projections, FP32 tie readout of clamped win sums and absolute differences, and retained legacy head definitions |
-| `model.py` | Differentiable shared backbone/adapters, config-only head initialization with lazy frozen-backbone loading on feature misses and CPU/CUDA RNG preservation, direct device loading, pooling/dtypes, head calls, and per-joint-batch checkpointing |
-| `extractor.py` | No-gradient CPU features for warmup or joint validation, optionally filling only missing branches into a shared tensor, with branch-batch progress callbacks |
+| `pooling.py` | Shared last-token-query multi-head cross-attention, independent FP32 Pre-LNs, masked FP32 scores/softmax, zero-initialized output projection, and paired residual dropout with FP32 fusion |
+| `model.py` | Differentiable shared backbone/adapters, explicit last-token warmup versus cross-attention joint encoding, RNG-preserving pooler initialization, config-only head initialization with lazy frozen-backbone loading on feature misses, direct device loading, head calls, and per-joint-batch backbone/pooler checkpointing |
+| `extractor.py` | Explicit pooling selection for unchanged frozen/warmup CPU features or FP32 joint-validation features, optionally filling only missing warmup branches into a shared tensor, with branch-batch progress callbacks |
 | `trainer.py` | CPU token preparation, plateau-scheduled frozen-head validation, epoch-based exponential build/warmup and independent update-based cosine joint learning-rate curves, frozen-head validation early stopping with best-epoch predictions and per-epoch progress, both branch graphs and one backward pass, optimizer/scaler state, fixed-rate lower-epoch warmup continuation and shuffle replay, epoch-end warmup train/validation inference on shared features, independent extraction/warmup/joint progress and executed epoch counts, standalone cached-head evaluation, and optional training/validation memory intervals |
 | `warmup_cache.py` | Completed head/AdamW/scaler/RNG identity, exact exponential-training or descending fixed-rate compatible-epoch lookup, distinct source/target paths, validation, atomic storage, and restoration |
 | `warmup_feature_cache.py` | Adapter-free feature identity, complete-token branch lookup, missing-input deduplication/rebinding, and shared embedding-cache publication across frozen SR2 and standalone/inline warmup |
-| `checkpoint.py` | Destination write preflight, portable adapter/head persistence and CPU readback validation, revision/architecture compatibility, and merged-backbone/tokenizer export with metadata, local validation, and recoverable directory replacement |
+| `checkpoint.py` | Destination write preflight, schema-v3 adapter/pooling/head persistence and CPU readback validation, pooler architecture/dimension/head-count compatibility and FP32 tensor validation, and merged-backbone/tokenizer export with metadata, local validation, and recoverable directory replacement |
 | `pipeline.py` | LoRA holdout orchestration and independent full-data build flow with CPU preparation and both write preflights before GPU setup, adapter/head saving before merged export, cleanup preserving execution errors |
 
 ### Reporting
@@ -220,7 +223,7 @@ defaults to `./results` and controls validation, report, and log roots.
 | `<CACHE_PATH>/token_cache/`, `embedding_cache/`, `adapter_batches/plans/` | Shared token, frozen/warmup-feature, and LoRA base-plan stores |
 | `<CACHE_PATH>/SR2_Qwen3_4B_lora_warmup/` | Completed Skywork head state, shared by frozen SR2, LoRA SR2, and standalone warmup |
 | `models/SR2_Qwen3_4B/head[_TAG].pt` | Independent frozen SR2 head and encoding/training metadata |
-| `models/SR2_Qwen3_4B_lora/adapter[_TAG].pt` | SR2 production adapter/head |
+| `models/SR2_Qwen3_4B_lora/adapter[_TAG].pt` | SR2 schema-v3 production adapter/pooling/head |
 | `models/SR2_Qwen3_4B_lora/merged[_TAG]/` | Full LoRA-merged backbone, tokenizer, and export metadata |
 | `<RESULT_PATH>/MODEL-<timestamp>/` | Completed validation CSV, metrics, and YAML snapshot |
 | `<RESULT_PATH>/comprehensive/` | Latest synthesized report pair |
@@ -308,8 +311,14 @@ present in a fresh checkout.
    epochs before publishing a separate target cache. Progress and metrics count only
    newly executed work; schema v5 and existing fixed-rate cache keys remain unchanged.
 6. **LoRA inputs and attention:** never truncate adapter inputs. Right-pad without
-   masks, pool the last real token, and preserve scoped SDPA/checkpoint
-   recomputation settings. Restore global predicates/flags after failures.
+   backbone masks. Frozen and warmup paths explicitly retain last-real-token
+   pooling and existing feature/cache identities. Joint training, joint validation,
+   and production inference apply shared last-token-query cross-attention to the
+   complete final-normalized backbone output. Mask keys after the last real token,
+   include that token, and use no extra causal mask. Both branches share pooler
+   parameters and one residual dropout mask per pair. Preserve scoped backbone
+   SDPA settings; the joint checkpointing decision also covers pooler forwards,
+   reusing the supplied dropout mask. Restore global predicates/flags after failures.
    See [hardware/input behavior](docs/lora.md#hardware-and-input-limits).
 7. **Optimizer groups:** preserve row-normalized loss, one clipping/update boundary
    per finalized group, short-tail merging, and the merged joint update last.
@@ -337,7 +346,10 @@ present in a fresh checkout.
    `0` or at least `1`, defaulting to `1.0`. Frozen SR2, warmup, and joint LoRA
    resolve independent multipliers; the joint transition resets rates and switches
    the `raw_t` multiplier. All schedulers derive rates from explicit group
-   multipliers. Head warmup and
+   multipliers. Joint cross-attention projection and LayerNorm groups use
+   `cross_attention_lr_multiplier` relative to the base rate, including the delay
+   and cosine endpoint; only the LayerNorm group has zero weight decay.
+   Head warmup and
    frozen SR2 builds derive exponential decay from `build_epochs` and `build_min_lr`,
    setting one rate at the start of each epoch. The first epoch uses the initial
    rate; for multiple epochs, the final epoch uses the minimum exactly. A single
@@ -358,9 +370,12 @@ present in a fresh checkout.
    counter without restoring `patience` on later improvements or resetting other
    scheduler/optimizer/model state. See
    [batching](docs/lora.md#optional-token-budget-training-batches).
-8. **Precision:** trainable adapter/head parameters, gradients, and AdamW moments
-   stay FP32. BF16 features/head autocast and FP32 logits retain the documented
-   policy. BF16 LoRA input dtype upcasting is disabled once after adapter
+8. **Precision:** trainable adapter/pooling/head parameters, gradients, and AdamW moments
+   stay FP32. Warmup feature dtypes and head computation retain the documented
+   policy. Pooler projections and probability/value products use the configured
+   compute dtype; Pre-LNs, QK matmul, masking/softmax, and residual fusion are FP32.
+   Joint pooled features remain FP32 through temporary CPU validation storage.
+   BF16 LoRA input dtype upcasting is disabled once after adapter
    initialization for the model instance; forward and checkpoint recomputation
    do not traverse the model to change that policy. Evaluation disables gradient
    checkpointing. See [precision](docs/lora.md#hardware-and-input-limits).
@@ -377,6 +392,9 @@ present in a fresh checkout.
    Warmup cache metadata includes `t_lr_multiplier` only for non-default warmup
    multipliers, including zero, preserving existing default keys and schema v5.
    Joint multipliers do not affect warmup identity.
+   Cross-attention is bypassed for every warmup extraction and initialized after
+   the original head without advancing its CPU RNG. Its fields and weights never
+   enter warmup features, cache identities, or cached head optimizer state.
    Warmup caches retain optimizer state for warmup continuation. On entry to the
    first joint epoch, clear AdamW moments and step counters once, including after
    complete cache hits and partial-cache continuation. Preserve trained weights,
@@ -392,9 +410,11 @@ present in a fresh checkout.
    Restore continuation RNG after all feature preparation.
    No persisted live LoRA features or losses. See [warmup](docs/caching.md#lora-head-warmup).
 10. **Placement and production state:** load backbones directly on the configured
-    GPU with device maps, without replicas or CPU/disk offload. Production builds save adapter/head first, then export the LoRA-merged backbone and
-    tokenizer on CPU at the build precision. Adapter/head files retain their
-    schema and Hub revision; optimizer state is omitted. Merged exports use staged
+    GPU with device maps, without replicas or CPU/disk offload. Production builds save adapter/pooling/head first, then export the LoRA-merged backbone and
+    tokenizer on CPU at the build precision. Schema-v3 checkpoints retain the Hub
+    revision and require complete FP32 pooling tensors plus a versioned pooling
+    marker, dimension, and head count; old last-token production files require
+    rebuilding. Frozen-head and warmup schemas stay unchanged. Optimizer state is omitted. Merged exports use staged
     directory publication with backup/restore handling.
     See [GPU layout](docs/configuration.md#gpu-configuration) and [checkpoints](docs/lora.md#checkpoints).
 11. **Publication:** stage generated artifacts before exposure. `CacheStorage`

@@ -35,7 +35,7 @@ SR2_Qwen3_4B:
   extraction_budget: 1081344
   training_batch_size: 1024
   learning_rate: 0.0001
-  t_lr_multiplier: 1.0
+  t_lr_multiplier: 10.0
   build_min_lr: 0.085 ** 5
   weight_decay: 0.01
   max_grad_norm: 1.0
@@ -48,11 +48,11 @@ warmup:
   max_length: 13866
   hidden_size: 128
   dropout: 0.1
-  build_epochs: 22
+  build_epochs: 15
   extraction_budget: 1081344
   training_batch_size: 1024
   learning_rate: 0.0001
-  t_lr_multiplier: 1.0
+  t_lr_multiplier: 10.0
   build_min_lr: 0.0001
   weight_decay: 0.01
   max_grad_norm: 1.0
@@ -60,6 +60,9 @@ warmup:
   dataloader_workers: 0
 
 SR2_Qwen3_4B_lora:
+  cross_attention_dim: 256
+  cross_attention_heads: 4
+  cross_attention_lr_multiplier: 10.0
   label_smoothing: 0.0
   model_name: Skywork/Skywork-Reward-V2-Qwen3-4B
   max_length: 13866
@@ -71,7 +74,7 @@ SR2_Qwen3_4B_lora:
   epochs: 2
   extraction_budget: 778240
   learning_rate: 0.0001
-  t_lr_multiplier: 1.0
+  t_lr_multiplier: 10.0
   min_lr_ratio: 0.0
   lr_decay_delay_epochs: 0
   hidden_size: 128

@@ -6,6 +6,19 @@ Use the current [configuration reference](configuration.md) for new runs.
 These notes explain historical names and artifacts; they do not change saved
 experiments or make old checkpoints compatible with a new architecture.
 
+## LoRA cross-attention pooling
+
+LoRA joint training, joint validation, and production inference now use
+`last_token_query_cross_attention_v1` after the backbone's full final RMSNorm.
+Production checkpoint schema v3 adds mandatory FP32 `pooling_state_dict` weights
+and attention-dimension/head-count metadata. Rebuild schema-v2 last-token
+production checkpoints; changing metadata cannot supply the trained pooler.
+The SR2 v9 comparison head, frozen-head schema v1, warmup schema v5, and existing
+last-token warmup feature identities remain unchanged. Current compatible warmup
+states can be reused. New configuration fields have defaults; see
+[pooling](lora.md#last-token-query-cross-attention-pooling) and
+[model fields](configuration.md#model-fields).
+
 ## Removed submission workflow
 
 The project no longer provides submission inference. `model MODEL --submit` and
@@ -457,7 +470,7 @@ not supported YAML keys. Configure their documented public fields instead.
 | LoRA batch-plan schemas before v4 | Rebuilt when needed |
 | Warmup schemas before v5 or incompatible historical model/head identities | Not reused by active SR2 |
 | Historical frozen head checkpoints, including schemas before v3 | Retained for historical code; incompatible with the new frozen SR2 head and not converted |
-| Adapter/head schema v1 or another head architecture | Rebuild for the current schema-v2 SR2 head |
+| Adapter/head schema v1/v2, last-token pooling, or another head architecture | Rebuild for the current schema-v3 SR2 adapter/pooling/head checkpoint |
 | Plain-text SR2 warmup / adapter-head checkpoint | New serializer keys for warmup; retrain production checkpoint for chat-template input |
 | Historical quantized adapter/head checkpoints | Incompatible with active non-quantized LoRA profiles |
 

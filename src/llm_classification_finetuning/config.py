@@ -153,6 +153,9 @@ class LoRAModelConfig(WarmupModelConfig):
 	lr_decay_delay_epochs: int = field(default=0, kw_only=True)
 	warmup_label_smoothing: float = field(default=0.0, kw_only=True)
 	warmup_t_lr_multiplier: float = field(default=1.0, kw_only=True)
+	cross_attention_dim: int = field(default=256, kw_only=True)
+	cross_attention_heads: int = field(default=4, kw_only=True)
+	cross_attention_lr_multiplier: float = field(default=10.0, kw_only=True)
 	gradient_checkpointing_threshold: int = 0
 	gradient_checkpointing_budget: int = 0
 
@@ -574,6 +577,31 @@ def _load_lora_model_config(
 		raise ConfigurationError(
 			f"{field('lora_target_modules')} cannot contain duplicates."
 		)
+	cross_attention_dim = _require_positive_integer(
+		section.get("cross_attention_dim", 256), field("cross_attention_dim")
+	)
+	cross_attention_heads = _require_positive_integer(
+		section.get("cross_attention_heads", 4), field("cross_attention_heads")
+	)
+	if cross_attention_dim % cross_attention_heads:
+		raise ConfigurationError(
+			f"{field('cross_attention_heads')} must divide {field('cross_attention_dim')}."
+		)
+	learning_rate = _require_learning_rate(
+		section.get("learning_rate"), field("learning_rate")
+	)
+	cross_attention_lr_multiplier = _require_float(
+		section.get("cross_attention_lr_multiplier", 10.0),
+		field("cross_attention_lr_multiplier"),
+	)
+	attention_learning_rate = learning_rate * cross_attention_lr_multiplier
+	if cross_attention_lr_multiplier <= 0.0 or not (
+		math.isfinite(attention_learning_rate) and attention_learning_rate > 0.0
+	):
+		raise ConfigurationError(
+			f"{field('cross_attention_lr_multiplier')} and its product with "
+			f"{field('learning_rate')} must be finite and greater than 0."
+		)
 
 	return LoRAModelConfig(
 		**asdict(shared),
@@ -584,9 +612,10 @@ def _load_lora_model_config(
 		head_inference_batch_size=positive_integer("head_inference_batch_size"),
 		gradient_accumulation_steps=positive_integer("gradient_accumulation_steps"),
 		epochs=positive_integer("epochs"),
-		learning_rate=_require_learning_rate(
-			section.get("learning_rate"), field("learning_rate")
-		),
+		learning_rate=learning_rate,
+		cross_attention_dim=cross_attention_dim,
+		cross_attention_heads=cross_attention_heads,
+		cross_attention_lr_multiplier=cross_attention_lr_multiplier,
 		min_lr_ratio=min_lr_ratio,
 		lr_decay_delay_epochs=lr_decay_delay_epochs,
 		lora_rank=positive_integer("lora_rank"),

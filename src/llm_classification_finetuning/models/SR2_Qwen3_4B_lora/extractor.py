@@ -25,6 +25,7 @@ class LoRAEmbeddingExtractor:
 		row_ids: tuple[int, ...],
 		*,
 		stage: str,
+		use_cross_attention: bool,
 		target: torch.Tensor | None = None,
 		progress: TrainingProgress | None = None,
 		description: str = "",
@@ -35,13 +36,14 @@ class LoRAEmbeddingExtractor:
 				"Feature extraction requires a fixed ExtractionBatchSampler."
 			)
 		model.eval()
+		feature_dtype = torch.float32 if use_cross_attention else model.feature_dtype
 		shape = (len(loader.dataset), model.backbone_hidden_size)
 		if target is None:
-			features = torch.empty(shape, dtype=model.feature_dtype, device="cpu")
+			features = torch.empty(shape, dtype=feature_dtype, device="cpu")
 		else:
 			if (
 				target.shape != shape
-				or target.dtype != model.feature_dtype
+				or target.dtype != feature_dtype
 				or target.device.type != "cpu"
 			):
 				raise ValueError(
@@ -49,7 +51,9 @@ class LoRAEmbeddingExtractor:
 				)
 			features = target
 		for index, (indices, batch) in enumerate(zip(sampler, loader, strict=True)):
-			pooled = model.encode_branch(batch).to(device="cpu", dtype=features.dtype)
+			pooled = model.encode_branch(
+				batch, use_cross_attention=use_cross_attention
+			).to(device="cpu", dtype=features.dtype)
 			if not torch.isfinite(pooled).all():
 				raise ModelExecutionError(
 					f"{self._model_label} {stage} extraction produced non-finite features."

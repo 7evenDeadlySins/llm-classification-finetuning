@@ -583,6 +583,7 @@ class LoRATrainer:
 			"lr_multiplier": 1.0,
 		}
 		parameter_groups = [head_group]
+		attention_groups: list[dict[str, Any]] = []
 		t_group = None
 		if raw_t is not None:
 			t_group = {"params": [raw_t], "lr_multiplier": t_lr_multiplier}
@@ -601,6 +602,36 @@ class LoRATrainer:
 					"lr_multiplier": 1.0,
 				},
 			)
+			if model.pooling is None:
+				raise ModelExecutionError(
+					"Joint training requires cross-attention parameters."
+				)
+			attention_groups = [
+				{
+					"params": [
+						parameter
+						for projection in (
+							model.pooling.q_proj,
+							model.pooling.k_proj,
+							model.pooling.v_proj,
+							model.pooling.o_proj,
+						)
+						for parameter in projection.parameters()
+					],
+					"weight_decay": self._config.weight_decay,
+				},
+				{
+					"params": [
+						parameter
+						for norm in (model.pooling.norm_q, model.pooling.norm_kv)
+						for parameter in norm.parameters()
+					],
+					"weight_decay": 0.0,
+				},
+			]
+			for group in attention_groups:
+				group["lr_multiplier"] = self._config.cross_attention_lr_multiplier
+				group["lr"] = self._config.learning_rate * group["lr_multiplier"]
 		optimizer = AdamW(parameter_groups, weight_decay=self._config.weight_decay)
 		head_lr_schedule = (
 			_ExponentialLearningRateSchedule(
@@ -781,6 +812,9 @@ class LoRATrainer:
 				warmup_validation = None
 				loader = training.loader
 				# Joint training starts with fresh AdamW moments and step counters.
+				# Keep pooler groups outside the unchanged head-only warmup optimizer.
+				for group in attention_groups:
+					optimizer.add_param_group(group)
 				if t_group is not None:
 					t_group["lr_multiplier"] = self._config.t_lr_multiplier
 				_set_group_learning_rates(
@@ -1227,6 +1261,7 @@ class LoRATrainer:
 					model,
 					canonical_ids,
 					records,
+					use_cross_attention=False,
 					extraction_budget=extraction_budget,
 					seed=seed,
 					stage=(
@@ -1266,6 +1301,7 @@ class LoRATrainer:
 		row_ids: pd.Series,
 		records: tuple[PairwiseText, ...],
 		*,
+		use_cross_attention: bool,
 		extraction_budget: int,
 		seed: int,
 		stage: str,
@@ -1288,6 +1324,7 @@ class LoRATrainer:
 			extraction_loader,
 			tuple(int(row_id) for row_id in canonical_ids),
 			stage=stage,
+			use_cross_attention=use_cross_attention,
 			target=target,
 			progress=progress,
 			description=description,
@@ -1343,6 +1380,7 @@ class LoRATrainer:
 				model,
 				reference["id"],
 				records,
+				use_cross_attention=not head_only,
 				extraction_budget=self._config.extraction_budget,
 				seed=self._config.random_state,
 				stage=progress_stage,
