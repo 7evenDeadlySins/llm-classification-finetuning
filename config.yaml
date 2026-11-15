@@ -70,6 +70,7 @@ SR2_Qwen3_4B_lora:
   extraction_budget: 778240
   learning_rate: 0.0001
   min_lr_ratio: 0.25
+  lr_decay_delay_epochs: 0
   hidden_size: 128
   weight_decay: 0.01
   dropout: 0.1

@@ -125,6 +125,7 @@ The following names apply independently inside each relevant section.
 | `patience` | Frozen SR2 validation | Non-negative integer; default `2`; initial ReduceLROnPlateau patience (reduces the rate after more than this many consecutive non-improving epochs); steps down by `1` toward `0` across consecutive `early_stopping` windows |
 | `head_inference_batch_size`, `gradient_accumulation_steps` | LoRA | Positive integers |
 | `min_lr_ratio` | LoRA | Number in `[0, 1]`; default `0.125`; minimum joint learning rate as a fraction of `learning_rate` |
+| `lr_decay_delay_epochs` | LoRA | Non-negative integer; default `0`; number of initial joint epochs at fixed `learning_rate` before cosine decay; values at least `epochs` keep the rate fixed throughout |
 | `build_min_lr` | Frozen SR2 builds and `warmup` | Finite absolute learning rate in `(0, learning_rate]`, supplied as a number or string power expression; defaults to that head stage's `learning_rate / 5`; used by the final epoch when `build_epochs > 1` |
 | `max_grad_norm` | Frozen SR2, LoRA, and `warmup` | Positive number |
 | `lora_rank`, `lora_alpha` | LoRA | Positive integers |
@@ -230,10 +231,15 @@ snapshots record the configured initial `patience`. Validation does not apply
 `build_epochs` or `build_min_lr`; builds do not use `factor` or `patience`.
 
 Joint training uses `learning_rate` for both adapters and the classifier head.
-One cosine curve spans all joint epochs and reaches
-`learning_rate * min_lr_ratio` on the final planned optimizer update; a run with
-only one update uses the initial rate. `min_lr_ratio: 0` decays to zero, while
-`1` keeps the rate fixed. Omitting the field uses `0.125`.
+`lr_decay_delay_epochs` keeps the first configured number of joint epochs at that
+initial rate, then one cosine curve spans the remaining planned optimizer updates.
+The total `epochs` stays unchanged, and head warmup has its own independent
+schedule. The delay defaults to `0`, preserving the original curve; values at
+least `epochs` keep the rate fixed throughout joint training. When at least two
+updates remain after the delay, the first uses the initial rate and the final
+uses `learning_rate * min_lr_ratio`. A single remaining update uses the initial
+rate. `min_lr_ratio: 0` decays to zero, while `1` keeps the rate fixed. Omitting
+`min_lr_ratio` uses `0.125`.
 
 Frozen SR2 builds derive exponential decay from their independent `build_epochs`
 and `build_min_lr`. Standalone and inline head warmup use the corresponding fields

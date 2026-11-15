@@ -326,8 +326,12 @@ present in a fresh checkout.
    Checkpointing is chosen once per A/B joint micro-batch through backward;
    both branch graphs are retained until one backward pass, and disabling
    checkpointing removes input-gradient hooks. Joint groups share one learning
-   rate and one cosine curve across all joint epochs; each consumed optimizer
-   group advances decay once, including FP16-skipped updates. Head warmup and
+   rate, holding it fixed for the first `lr_decay_delay_epochs` joint epochs
+   (default `0`) before one cosine curve across the remaining updates. The total
+   epoch count stays unchanged; a delay at least as large as `epochs` keeps the
+   rate fixed throughout, and a single remaining update uses the initial rate.
+   Each consumed optimizer group advances the schedule once, including
+   FP16-skipped updates. Head warmup and
    frozen SR2 builds derive exponential decay from `build_epochs` and `build_min_lr`,
    setting one rate at the start of each epoch. The first epoch uses the initial
    rate; for multiple epochs, the final epoch uses the minimum exactly. A single

@@ -84,7 +84,7 @@ class _EpochTrainingLosses:
 
 
 class _CosineLearningRateSchedule:
-	"""Set one shared rate per planned stage update, including FP16 skips."""
+	"""Hold then cosine-decay one shared rate per update, including FP16 skips."""
 
 	def __init__(
 		self,
@@ -93,28 +93,37 @@ class _CosineLearningRateSchedule:
 		learning_rate: float,
 		min_lr_ratio: float,
 		total_steps: int,
+		delay_steps: int = 0,
 	) -> None:
 		if total_steps <= 0:
 			raise ValueError("Cosine decay requires at least one optimizer update.")
+		if not 0 <= delay_steps <= total_steps:
+			raise ValueError("Cosine decay delay must be between 0 and total_steps.")
 		self._optimizer = optimizer
 		self._learning_rate = learning_rate
 		self._min_lr_ratio = min_lr_ratio
 		self._total_steps = total_steps
+		self._delay_steps = delay_steps
 		self._step_index = 0
 
 	def step(self) -> None:
 		"""Apply the current update's rate before the optimizer attempts its step."""
 		if self._step_index >= self._total_steps:
 			raise RuntimeError("Cosine decay exceeded the planned optimizer updates.")
-		progress = (
-			self._step_index / (self._total_steps - 1) if self._total_steps > 1 else 0.0
-		)
-		multiplier = (
-			self._min_lr_ratio
-			+ (1.0 - self._min_lr_ratio) * (1.0 + math.cos(math.pi * progress)) / 2.0
-		)
+		decay_steps = self._total_steps - self._delay_steps
+		if self._step_index < self._delay_steps or decay_steps <= 1:
+			learning_rate = self._learning_rate
+		else:
+			progress = (self._step_index - self._delay_steps) / (decay_steps - 1)
+			multiplier = (
+				self._min_lr_ratio
+				+ (1.0 - self._min_lr_ratio)
+				* (1.0 + math.cos(math.pi * progress))
+				/ 2.0
+			)
+			learning_rate = self._learning_rate * multiplier
 		for group in self._optimizer.param_groups:
-			group["lr"] = self._learning_rate * multiplier
+			group["lr"] = learning_rate
 		self._step_index += 1
 
 
@@ -725,6 +734,8 @@ class LoRATrainer:
 					learning_rate=self._config.learning_rate,
 					min_lr_ratio=self._config.min_lr_ratio,
 					total_steps=joint_layout.update_count * self._config.epochs,
+					delay_steps=joint_layout.update_count
+					* min(self._config.lr_decay_delay_epochs, self._config.epochs),
 				)
 				if validation is not None:
 					joint_validation_loader = self._create_extraction_loader(

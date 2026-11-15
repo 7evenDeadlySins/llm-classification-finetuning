@@ -148,6 +148,7 @@ class LoRAModelConfig(WarmupModelConfig):
 	lora_dropout: float
 	lora_target_modules: tuple[str, ...]
 	min_lr_ratio: float = field(default=0.125, kw_only=True)
+	lr_decay_delay_epochs: int = field(default=0, kw_only=True)
 	warmup_label_smoothing: float = field(default=0.0, kw_only=True)
 	gradient_checkpointing_threshold: int = 0
 	gradient_checkpointing_budget: int = 0
@@ -530,6 +531,13 @@ def _load_lora_model_config(
 	)
 	if not 0.0 <= min_lr_ratio <= 1.0:
 		raise ConfigurationError(f"{field('min_lr_ratio')} must be in [0, 1].")
+	lr_decay_delay_epochs = _require_integer(
+		section.get("lr_decay_delay_epochs", 0), field("lr_decay_delay_epochs")
+	)
+	if lr_decay_delay_epochs < 0:
+		raise ConfigurationError(
+			f"{field('lr_decay_delay_epochs')} cannot be negative."
+		)
 	checkpointing_threshold = _require_integer(
 		section.get("gradient_checkpointing_threshold", 0),
 		field("gradient_checkpointing_threshold"),
@@ -572,6 +580,7 @@ def _load_lora_model_config(
 			section.get("learning_rate"), field("learning_rate")
 		),
 		min_lr_ratio=min_lr_ratio,
+		lr_decay_delay_epochs=lr_decay_delay_epochs,
 		lora_rank=positive_integer("lora_rank"),
 		lora_alpha=positive_integer("lora_alpha"),
 		lora_dropout=fraction("lora_dropout"),

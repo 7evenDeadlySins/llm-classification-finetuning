@@ -320,19 +320,24 @@ rate or target epoch count changes the full curve and trains from epoch index
 `0` on a cache miss. Lower-epoch continuation remains supported only when
 `build_min_lr = learning_rate`.
 
-Joint training uses `N = epochs * max(1, rows // G)`, using the joint
-optimizer-group size `G` above. For planned update index `i` from `0` through
-`N - 1`, when `N > 1`, its formula is unchanged:
+Joint training uses `U = max(1, rows // G)` updates per epoch and `N = epochs * U`
+total updates, using the joint optimizer-group size `G` above.
+`lr_decay_delay_epochs` defaults to `0` and counts joint epochs independently of
+head warmup. The first `H = min(lr_decay_delay_epochs, epochs) * U` updates keep
+the initial `learning_rate`. The total epoch count stays unchanged. For planned
+update index `i` from `H` through `N - 1`, when `N - H > 1`, the remaining curve is:
 
 ```text
-p = i / (N - 1)
+p = (i - H) / (N - H - 1)
 lr = learning_rate * (min_lr_ratio + (1 - min_lr_ratio) * (1 + cos(pi * p)) / 2)
 ```
 
-For joint training, the first update uses the initial rate and the last uses
-the minimum. Its `min_lr_ratio` defaults to `0.125`; `0` reaches zero and `1`
-keeps the rate fixed. A run with only one update uses the initial rate. The
-schedule applies immediately before each complete optimizer group's update attempt and
+The first update after the delay uses the initial rate and the last uses
+the minimum when at least two updates remain. If only one update remains, it
+uses the initial rate. A delay at least as large as `epochs` keeps the rate fixed
+throughout joint training. With a delay of `0`, the original curve is preserved.
+Its `min_lr_ratio` defaults to `0.125`; `0` reaches zero and `1` keeps the rate fixed.
+The schedule applies immediately before each complete optimizer group's update attempt and
 advances once for that consumed group, including when FP16 gradient scaling
 skips the parameter update. Micro-batches and evaluation do not advance a
 schedule; warmup does not advance the joint schedule. Packing and short-tail
