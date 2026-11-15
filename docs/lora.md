@@ -25,7 +25,7 @@ and [configuration](configuration.md) for the complete fields and parser default
 
 SR2 loads Skywork's Transformer through `AutoModel`, omitting its scalar reward
 head. Its comparison head shares L/M projections across wins and derives the tie
-logit from the sum and absolute difference of nonnegative win activations.
+logit from the sum and absolute difference of win activation magnitudes.
 The implementation and public Python APIs now live in
 `models/SR2_Qwen3_4B_lora/`. Head size, rank, smoothing, rates, and epochs may
 differ between presets; read their actual values.
@@ -45,11 +45,10 @@ P_B &= \operatorname{GELU}(BL-AM+B_1),\\
 W_A &= P_A\odot m_P,\qquad W_B=P_B\odot m_P,\\
 z_A &= W_A R,\qquad z_B=W_B R,\\
 C_A &= |W_A|,\qquad C_B=|W_B|,\\
-H &= \frac{2C_AC_B}{C_A+C_B+10^{-8}},\\
 u_{\mathrm{eff}} &= s\operatorname{softplus}(u/s),\qquad s=0.01,\\
-t &= \operatorname{softplus}(\mathrm{raw\_t}),\\
+t &= 1+\operatorname{softplus}(\mathrm{raw\_t}),\\
 z_{\mathrm{tie}} &= b_{\mathrm{tie}}+
-\bigl(H-t|C_A-C_B|\bigr)u_{\mathrm{eff}}.
+\bigl(C_A+C_B-t|C_A-C_B|\bigr)u_{\mathrm{eff}}.
 \end{aligned}
 $$
 
@@ -57,7 +56,7 @@ Here $L,M\in\mathbb{R}^{D\times h}$ and
 $R,u,u_{\mathrm{eff}}\in\mathbb{R}^{h\times 1}$. PyTorch stores the transposed
 linear weights; raw parameter `u` has shape `[1, h]`, while `raw_t` and
 `tie_bias` are scalars. The effective weights $u_{\mathrm{eff}}$ are positive,
-$t>0$, and $b_{\mathrm{tie}}$ (`tie_bias`) is unconstrained.
+$t>1$, and $b_{\mathrm{tie}}$ (`tie_bias`) is unconstrained.
 L/M/R are sampled independently from zero-mean uniform
 distributions $U(-\sqrt{3}\sigma,\sqrt{3}\sigma)$ with these standard deviations:
 
@@ -74,7 +73,7 @@ $U_0\sim U(0.5\mu,1.5\mu)$, then initialize
 $u=s\operatorname{invsoftplus}(U_0/s)$ using the stable inverse
 $\operatorname{invsoftplus}(x)=x+\log(-\operatorname{expm1}(-x))$.
 Thus the initial effective weights reproduce $U_0$.
-Initialize `raw_t` to $\operatorname{invsoftplus}(1)$, giving $t=1$, and
+Initialize `raw_t` to $\operatorname{invsoftplus}(2)$, giving $t=3$, and
 `tie_bias` to zero. The head has $2Dh+3h+2$ trainable parameters.
 All tie parameters and the win bias use the existing head learning rate and
 weight decay.
@@ -83,12 +82,11 @@ Win mask multiplication acts elementwise.
 Each sample's win branches share the standard dropout mask $m_P$ with
 $1/(1-p)$ scaling during training; evaluation disables it.
 The tie branch takes the absolute values of these same masked activations and
-combines their elementwise harmonic mean with a learned penalty on their absolute
+combines their sum with a learned penalty on their elementwise absolute
 difference. It adds no separate projection, GELU, or dropout mask.
 Swapping inputs exchanges win logits and preserves the tie logit under the same
-masks, because both the harmonic mean and absolute difference are symmetric.
-For identical inputs, the difference penalty vanishes and
-$z_{\mathrm{tie}}=b_{\mathrm{tie}}+\frac{2C_A^2}{2C_A+10^{-8}}u_{\mathrm{eff}}$.
+masks, because both the magnitude sum and absolute difference are symmetric.
+For identical inputs, $z_{\mathrm{tie}}=b_{\mathrm{tie}}+2C_Au_{\mathrm{eff}}$.
 
 The implementation batches A/B as `[batch, 2, D]` and stores $L^\top,M^\top$
 as contiguous blocks of one bias-free `Linear(D, 2h)`. One call computes both
@@ -100,32 +98,27 @@ There are three linear calls: the packed L/M projection, the shared win readout,
 and the tie readout. The former A-B and L+M tie projection is removed.
 All head parameters remain FP32. The win computation follows the existing head
 mixed-precision policy and converts its logits to FP32. With autocast disabled,
-the tie branch converts masked wins to FP32 before taking their absolute values.
-The harmonic mean, including its $10^{-8}$ denominator offset, absolute
-difference, effective weights, $t$, and final linear readout all use FP32.
-`torch.addcmul` combines the harmonic mean with the scaled difference penalty,
-and `F.linear` applies the tie readout and bias. Gradients flow through `u`,
-`raw_t`, `tie_bias`, and the reused wins.
+the tie branch converts masked wins to FP32 before taking absolute values and computes the
+sum, absolute difference, effective weights, $t$, and final linear readout in
+FP32. Gradients flow through `u`, `raw_t`, `tie_bias`, and the reused wins.
 Returned logits remain FP32 in the order A-win, B-win, tie.
 
 Checkpoints save `u`, `raw_t`, and `tie_bias` alongside L/M/R and the win bias.
 The architecture marker is
-`swap_equivariant_abs_diff_v10`, with embedding combination
-`cross_projected_abs_win_harmonic_diff`; adapter/head checkpoint schema is v2,
+`swap_equivariant_abs_diff_v11`, with embedding combination
+`cross_projected_abs_win_sum_diff`; adapter/head checkpoint schema is v2,
 frozen-head schema is v1, and warmup schema is v5. The marker selects different
 warmup cache keys and rejects earlier checkpoints without converting their
-weights. V9 has the same parameter names and shapes as v10; its original metadata
-identifies it, and the architecture check rejects it. Exact parameter-name/shape
-checks additionally reject earlier layouts, including v8's `raw_b_tie` and v7's
-`raw_w_tie`.
+weights. Exact parameter-name/shape checks additionally reject earlier layouts,
+including v8's `raw_b_tie` and v7's `raw_w_tie`.
 Rebuild those checkpoints with the matching configuration; warmup is regenerated.
-The initialization policy is versioned separately as
-`scaled_uniform_abs_gelu_harmonic_tie_v6` in the SR2 warmup identity: L/M/R retain
+The initialization policy retains its existing version,
+`scaled_uniform_clamped_gelu_tie_v5` in the SR2 warmup identity: L/M/R retain
 their scales, $B_1$ starts at zero, and the tie parameters use the initialization
 above. The architecture marker isolates old warmup states without a storage
 schema change.
 See [warmup identity](caching.md#identity) and the
-[v9-to-v10 migration](migration.md#current-sr2-v10-head-2026-11-16).
+[v11 migration](migration.md#current-sr2-v11-head-2026-11-16).
 There is no `A/B_swap` setting or orientation averaging for SR2.
 
 ## Hardware and input limits

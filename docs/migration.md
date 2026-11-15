@@ -270,9 +270,9 @@ identities and reuse rules. Reports from this version retain their v8 markers.
 
 ### Archived SR2 v9 head (2026-11-15)
 
-`swap_equivariant_abs_diff_v9` retained the cross-projected win branches, shared
-dropout, L/M/R initialization, and zero win projection bias. It removed the
-separate `(A-B)(L+M)` projection and derived tie features from the masked GELU
+`swap_equivariant_abs_diff_v9` retains the cross-projected win branches, shared
+dropout, L/M/R initialization, and zero win projection bias. It removes the
+separate `(A-B)(L+M)` projection and derives tie features from the masked GELU
 win activations:
 
 ```text
@@ -301,55 +301,38 @@ encoding of positive effective weights. With `s = 0.01` and
 the FP32 output order remains `[A-win, B-win, tie]`.
 
 Frozen SR2, LoRA SR2, standalone/inline warmup, and `submit.ipynb` used v9.
-V8 and earlier checkpoints required rebuilding; their weights were not converted.
-Architecture and exact tensor-name/shape checks rejected the older layouts,
-including `raw_b_tie`. The architecture and initialization version selected fresh warmup
+Rebuild v8 and earlier checkpoints; their weights are not converted. Architecture
+and exact tensor-name/shape checks reject the older layouts, including
+`raw_b_tie`. The architecture and initialization version select fresh warmup
 keys within the same namespace. Adapter/head schema v2, frozen-head schema v1,
 warmup schema v5, artifact paths, and historical files remain unchanged. Token,
 adapter-free frozen-feature, and batch-plan caches retain their reuse rules.
-The publisher retains the historical v8 and v9 embedding mappings. Historical
-v9 reports keep their original markers.
+The publisher retains the historical v8 embedding mapping; v9 reports use v9
+markers. See the [current head definition](lora.md#swap-equivariant-head).
 
-### Current SR2 v10 head (2026-11-16)
+### Current SR2 v11 head (2026-11-16)
 
-`swap_equivariant_abs_diff_v10` retains v9's subtractive cross-projected win
-branches, shared dropout mask, L/M/R and effective tie-weight initialization,
-and unconstrained zero-initialized `tie_bias`. It replaces the clamped win sum
-with the harmonic mean of the masked GELU win magnitudes:
+`swap_equivariant_abs_diff_v11` replaces v9's ReLU (`clamp_min(0)`) on the
+masked GELU win activations with elementwise absolute values:
 
 ```text
 C_A = abs(W_A); C_B = abs(W_B)
-H = 2 * C_A * C_B / (C_A + C_B + 1e-8)
 u_eff = 0.01 * softplus(u / 0.01)
-t = softplus(raw_t)
-z_tie = tie_bias + (H - t * abs(C_A - C_B)) @ u_eff
+t = 1 + softplus(raw_t)
+z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff
 ```
 
-The entire tie branch runs in FP32 with autocast disabled. Masked wins are
-converted to FP32 before taking their absolute values, and the harmonic mean,
-`1e-8` denominator offset, softplus transforms, difference penalty, and readout
-all use FP32. The implementation keeps the packed L/M projection and the shared
-win readout, then uses `torch.addcmul` for the penalty and `F.linear` for the tie
-readout and bias. There are still three linear calls and no additional dropout
-mask or projection.
+The feature combination is `cross_projected_abs_win_sum_diff`. The win logits,
+shared dropout, FP32 tie computation, parameter layout, and initialization retain
+v9 behavior, including initialization version `scaled_uniform_clamped_gelu_tie_v5`
+and initial `t = 3`. Version 10 previously identified a harmonic-mean tie head;
+v11 keeps the sum formula shown above.
 
-The embedding combination is `cross_projected_abs_win_harmonic_diff` and the
-initialization version is `scaled_uniform_abs_gelu_harmonic_tie_v6`. Scalar
-`raw_t` now starts at `invsoftplus(1)`, giving `t = 1` without the former `+1`
-offset. The stable inverse remains `x + log(-expm1(-x))`; all other parameter
-initializations are unchanged. Parameter names and shapes match v9, the count
-remains `2Dh + 3h + 2`, and output order stays FP32 `[A-win, B-win, tie]`.
-
-Frozen SR2, LoRA SR2, standalone/inline warmup, and `submit.ipynb` now use v10.
-The new architecture and initialization identities select fresh warmup keys;
-checkpoint architecture checks reject v9 and earlier metadata. Rebuild those
-checkpoints without relabeling or converting their weights. V9 has the same
-parameter layout, so tensor-name/shape checks alone cannot identify it.
-Adapter/head schema v2, frozen-head schema v1, warmup schema v5, artifact paths,
-and historical files remain unchanged. Token, adapter-free frozen-feature, and
-batch-plan caches retain their existing reuse rules. The publisher adds v10
-while retaining all historical embedding mappings. See the
-[current head definition](lora.md#swap-equivariant-head).
+Frozen SR2, LoRA SR2, standalone/inline warmup, and `submit.ipynb` use v11.
+The new architecture marker selects fresh head-warmup keys and requires v11
+checkpoints. Earlier heads can have identical tensor layouts with different
+predictions, so rebuild them with the current implementation. Storage schemas,
+token/feature/batch-plan cache identities, and historical artifacts are unchanged.
 
 ### Standalone SR2 warmup profile
 
