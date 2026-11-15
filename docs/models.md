@@ -182,23 +182,27 @@ See [checkpoint flags](commands.md#model-selection-and-execution-modes),
 ## Checkpoint compatibility
 
 SR2 retains adapter/head schema v2 and uses the
-`swap_equivariant_abs_diff_v9` architecture with fused subtractive L/M win
+`swap_equivariant_abs_diff_v10` architecture with fused subtractive L/M win
 projections. The tie reuses their GELU activations and shared dropout mask,
-clamps the masked wins to nonnegative `C_A` and `C_B`, and computes
-`tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff` in FP32 with autocast
+takes their absolute values `C_A` and `C_B`, forms
+`H = 2 * C_A * C_B / (C_A + C_B + 1e-8)`, and computes
+`tie_bias + (H - t * abs(C_A - C_B)) @ u_eff` in FP32 with autocast
 disabled. Here `u_eff = 0.01 * softplus(u / 0.01)` and
-`t = 1 + softplus(raw_t)`. Checkpoints store raw `u` (`[1, h]`) and scalars
+`t = softplus(raw_t)`. The entire tie branch, including the absolute values and
+`1e-8` offset, uses FP32. Checkpoints store raw `u` (`[1, h]`) and scalars
 `raw_t` and `tie_bias`. Initial effective weights are sampled uniformly around
-`0.2 / (3h)` and encoded with scaled inverse softplus; `t` starts at `3` and
-the unconstrained `tie_bias` at zero. L/M/R initialization is unchanged.
+`0.2 / (3h)` and encoded with scaled inverse softplus. Scalar `raw_t` starts at
+`invsoftplus(1)`, giving `t = 1`, while the unconstrained `tie_bias` starts at zero.
+L/M/R initialization is unchanged.
 See the [head definition](lora.md#swap-equivariant-head) for the exact bounds.
 Frozen SR2 uses the same head. Artifact paths remain unchanged. The architecture
-marker requires v9 checkpoints. Exact head tensor checks enforce the current
-parameter structure. Rebuild earlier checkpoints with the matching configuration. Existing
+marker requires v10 checkpoints, rejecting v9 even though its parameter layout
+matches. Exact head tensor checks enforce the current parameter structure.
+Rebuild earlier checkpoints with the matching configuration. Existing
 warmup files are preserved; the new architecture selects new cache keys and
 regenerates warmup. Frozen-head schema v1 and warmup schema v5 also remain
 unchanged. Token and frozen-backbone feature caches remain reusable under their
-existing identities. See the [v9 migration](migration.md#current-sr2-v9-head-2026-11-15).
+existing identities. See the [v10 migration](migration.md#current-sr2-v10-head-2026-11-16).
 See [adapter/head checks](lora.md#checkpoints) for the enforced fields and pinned
 Hub revision. Historical Qwen checkpoints are not converted into SR2 checkpoints.
 

@@ -14,9 +14,9 @@ from ..common.model import PairwiseClassificationHead
 PAIRWISE_MLP = "pairwise_mlp"
 EXPT = "swap_equivariant_reparam_v2"
 EXPT2 = "swap_equivariant_tie_from_wins_v2"
-SR2 = "swap_equivariant_abs_diff_v9"
+SR2 = "swap_equivariant_abs_diff_v10"
 # Bump this version whenever the SR2 initialization policy changes.
-SR2_INITIALIZATION_VERSION = "scaled_uniform_clamped_gelu_tie_v5"
+SR2_INITIALIZATION_VERSION = "scaled_uniform_abs_gelu_harmonic_tie_v6"
 
 
 class _LoRAClassificationHead(PairwiseClassificationHead):
@@ -163,10 +163,10 @@ class SwapEquivariantTieFromWinsClassificationHead(nn.Module):
 
 
 class SwapEquivariantAbsoluteDifferenceClassificationHead(nn.Module):
-	"""Read symmetric sums and absolute differences of clamped win activations."""
+	"""Read harmonic means and absolute differences of win activation magnitudes."""
 
 	head_architecture = SR2
-	EMBEDDING_COMBINATION = "cross_projected_clamped_win_sum_diff"
+	EMBEDDING_COMBINATION = "cross_projected_abs_win_harmonic_diff"
 
 	def __init__(
 		self,
@@ -208,12 +208,12 @@ class SwapEquivariantAbsoluteDifferenceClassificationHead(nn.Module):
 			initial_u = self.u / 0.01
 			# Stable inverse softplus: x + log(-expm1(-x)).
 			self.u.copy_(0.01 * (initial_u + torch.log(-torch.expm1(-initial_u))))
-			initial_t = self.raw_t.new_full((), 2.0)
+			initial_t = self.raw_t.new_full((), 1.0)
 			self.raw_t.copy_(initial_t + torch.log(-torch.expm1(-initial_t)))
 
 	@classmethod
 	def embedding_combination(cls) -> str:
-		"""Return the marker for clamped win sums and absolute differences."""
+		"""Return the marker for harmonic means and differences of win magnitudes."""
 		return cls.EMBEDDING_COMBINATION
 
 	def forward(self, h_a: Tensor, h_b: Tensor) -> Tensor:
@@ -255,12 +255,13 @@ class SwapEquivariantAbsoluteDifferenceClassificationHead(nn.Module):
 				)
 				wins = wins * win_mask
 			win_logits = F.linear(wins, w_out).squeeze(-1).float()
-			c_a, c_b = wins.float().clamp_min(0).unbind(dim=1)
-			tie_sum = c_a + c_b
+			# Cast before abs so the entire tie branch, including eps, stays FP32.
+			c_a, c_b = wins.float().abs().unbind(dim=1)
+			harmonic = (2.0 * c_a * c_b) / (c_a + c_b + 1e-8)
 			tie_diff = (c_a - c_b).abs()
 			u_eff = F.softplus(self.u, beta=100.0)
-			t = 1.0 + F.softplus(self.raw_t)
-			tie_features = torch.addcmul(tie_sum, tie_diff, t, value=-1.0)
+			t = F.softplus(self.raw_t)
+			tie_features = torch.addcmul(harmonic, tie_diff, t, value=-1.0)
 			tie = F.linear(tie_features, u_eff, self.tie_bias.unsqueeze(0))
 		return torch.cat((win_logits, tie), dim=-1)
 

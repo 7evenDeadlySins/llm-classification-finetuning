@@ -272,39 +272,42 @@ feature, and head entries. Existing cache files and schema v5 are preserved.
 
 Frozen SR2 builds, LoRA SR2, and standalone warmup write `SR2_Qwen3_4B_lora_warmup/<key>.pt` using
 Skywork features in the shipped presets. All use the
-`swap_equivariant_abs_diff_v9` head architecture and warmup schema v5.
+`swap_equivariant_abs_diff_v10` head architecture and warmup schema v5.
 This head packs L/M into one projection for subtractive cross-projected wins.
-The tie reuses their masked GELU activations, clamps them to nonnegative `C_A`
-and `C_B`, and computes
-`z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff`.
+The tie reuses their masked GELU activations as `C_A = abs(W_A)` and
+`C_B = abs(W_B)`, computes `H = 2 * C_A * C_B / (C_A + C_B + 1e-8)`, and reads
+`z_tie = tie_bias + (H - t * abs(C_A - C_B)) @ u_eff`.
 The entire tie calculation runs in FP32 with autocast disabled, with
-`u_eff = 0.01 * softplus(u / 0.01)` and `t = 1 + softplus(raw_t)`.
+`u_eff = 0.01 * softplus(u / 0.01)` and `t = softplus(raw_t)`. The absolute
+values, harmonic mean and its `1e-8` offset, parameters, and readout all use FP32.
 Both win branches share one dropout mask, also inherited by the tie features;
 there is no separate tie projection or dropout mask. The architecture marker selects
 new cache keys within the existing namespace; earlier entries remain on disk and
-are not reused or migrated. Exact head/optimizer tensor names and shapes
+are not reused or migrated. V9 has the same parameter layout as v10; its
+architecture and initialization metadata isolate it without relabeling weights.
+Exact head/optimizer tensor names and shapes
 additionally reject earlier structures, including v8's `raw_b_tie` and v7's
 `raw_w_tie`, even if their metadata is relabeled. Saved head and optimizer states
 name the tie parameters `u`, `raw_t`, and `tie_bias`.
 Warmup is regenerated for the new architecture.
 
 SR2 also includes `head_initialization_version` in its warmup metadata, currently
-`scaled_uniform_clamped_gelu_tie_v5`. The full metadata is hashed with SHA-256
+`scaled_uniform_abs_gelu_harmonic_tie_v6`. The full metadata is hashed with SHA-256
 to form the cache key and must match the selected source exactly when loading. Earlier
 Xavier-initialized SR2 entries lack this field; harmonic/discrepancy heads use
 `scaled_uniform_zero_discrepancy_v1`. Both select different keys and remain on
 disk without reuse or migration. Initialization versioning
 does not change the head architecture, warmup schema v5, production-checkpoint
-compatibility, or other heads' cache identities. V9 uses scaled uniform weights
+compatibility, or other heads' cache identities. V10 uses scaled uniform weights
 for L/M and the win readout and initializes the win projection bias to zero.
 The initial effective tie weights are sampled from
 `U(0.5 * mean, 1.5 * mean)`, with `mean = 0.2 / (3h)`, and encoded in `u`
 using `0.01 * invsoftplus(U_0 / 0.01)`. Scalar `raw_t` starts at
-`invsoftplus(2)`, giving `t = 3`, and unconstrained `tie_bias` starts at zero.
+`invsoftplus(1)`, giving `t = 1`, and unconstrained `tie_bias` starts at zero.
 See the [head definition](lora.md#swap-equivariant-head) for the stable inverse.
-Together, the v9 architecture and new initialization version isolate v8 and
+Together, the v10 architecture and new initialization version isolate v9 and
 earlier training states without changing storage schemas or migrating old files.
-Compatible v9 entries are shared by frozen SR2 builds and
+Compatible v10 entries are shared by frozen SR2 builds and
 standalone/inline SR2 warmup when all identity fields match. Token, adapter-free feature, and batch-plan
 caches retain their own reuse rules because their representations are unchanged.
 
