@@ -268,7 +268,7 @@ existing namespace. Storage schemas, artifact paths, and old files were unchange
 Token, adapter-free frozen-feature, and batch-plan caches retained their existing
 identities and reuse rules. Reports from this version retain their v8 markers.
 
-### Archived SR2 v9 head (2026-11-15)
+### Current SR2 v9 head (2026-11-15)
 
 `swap_equivariant_abs_diff_v9` retains the cross-projected win branches, shared
 dropout, L/M/R initialization, and zero win projection bias. It removes the
@@ -300,39 +300,15 @@ encoding of positive effective weights. With `s = 0.01` and
 `raw_b_tie` and starts at zero. The parameter count becomes `2Dh + 3h + 2`;
 the FP32 output order remains `[A-win, B-win, tie]`.
 
-Frozen SR2, LoRA SR2, standalone/inline warmup, and `submit.ipynb` used v9.
+Frozen SR2, LoRA SR2, standalone/inline warmup, and `submit.ipynb` use v9.
 Rebuild v8 and earlier checkpoints; their weights are not converted. Architecture
 and exact tensor-name/shape checks reject the older layouts, including
 `raw_b_tie`. The architecture and initialization version select fresh warmup
 keys within the same namespace. Adapter/head schema v2, frozen-head schema v1,
 warmup schema v5, artifact paths, and historical files remain unchanged. Token,
 adapter-free frozen-feature, and batch-plan caches retain their reuse rules.
-The publisher retains the historical v8 embedding mapping; v9 reports use v9
+The publisher retains the historical v8 embedding mapping; new reports use v9
 markers. See the [current head definition](lora.md#swap-equivariant-head).
-
-### Current SR2 v11 head (2026-11-16)
-
-`swap_equivariant_abs_diff_v11` replaces v9's ReLU (`clamp_min(0)`) on the
-masked GELU win activations with elementwise absolute values:
-
-```text
-C_A = abs(W_A); C_B = abs(W_B)
-u_eff = 0.01 * softplus(u / 0.01)
-t = 1 + softplus(raw_t)
-z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff
-```
-
-The feature combination is `cross_projected_abs_win_sum_diff`. The win logits,
-shared dropout, FP32 tie computation, parameter layout, and initialization retain
-v9 behavior, including initialization version `scaled_uniform_clamped_gelu_tie_v5`
-and initial `t = 3`. Version 10 previously identified a harmonic-mean tie head;
-v11 keeps the sum formula shown above.
-
-Frozen SR2, LoRA SR2, standalone/inline warmup, and `submit.ipynb` use v11.
-The new architecture marker selects fresh head-warmup keys and requires v11
-checkpoints. Earlier heads can have identical tensor layouts with different
-predictions, so rebuild them with the current implementation. Storage schemas,
-token/feature/batch-plan cache identities, and historical artifacts are unchanged.
 
 ### Standalone SR2 warmup profile
 

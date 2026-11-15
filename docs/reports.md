@@ -137,8 +137,7 @@ cached-head evaluation summaries and empty epoch lists, remain unchanged.
 
 | Profile | `head_architecture` | `embedding_combination` |
 | --- | --- | --- |
-| SR2 | `swap_equivariant_abs_diff_v11` | `cross_projected_abs_win_sum_diff` |
-| Historical SR2 with clamped win sums | `swap_equivariant_abs_diff_v9` | `cross_projected_clamped_win_sum_diff` |
+| SR2 | `swap_equivariant_abs_diff_v9` | `cross_projected_clamped_win_sum_diff` |
 | Historical SR2 with an absolute scalar readout of signed differences | `swap_equivariant_abs_diff_v8` | `cross_projected_signed_diff_abs_readout` |
 | Historical SR2 with elementwise absolute differences and a negative softplus readout | `swap_equivariant_abs_diff_v7` | `cross_projected_linear_abs_diff` |
 | Historical SR2 with an L-M tie projection | `swap_equivariant_abs_diff_v6` | `cross_projected_linear_abs_diff` |
@@ -152,8 +151,8 @@ cached-head evaluation summaries and empty epoch lists, remain unchanged.
 
 These markers identify model behavior; historical results preserve their
 original values. Combination markers are metrics, not additional YAML options.
-The v11 markers apply to frozen and LoRA SR2 reports. For the masked win
-activation magnitudes `C_A` and `C_B`, they identify
+The v9 markers apply to frozen and LoRA SR2 reports. For the nonnegative clamped
+win activations `C_A` and `C_B`, they identify
 `z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff`, where
 `u_eff = 0.01 * softplus(u / 0.01)` and `t = 1 + softplus(raw_t)`.
 The tie computation is FP32 and `tie_bias` is unconstrained. See the

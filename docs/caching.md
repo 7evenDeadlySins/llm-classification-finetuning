@@ -272,9 +272,9 @@ feature, and head entries. Existing cache files and schema v5 are preserved.
 
 Frozen SR2 builds, LoRA SR2, and standalone warmup write `SR2_Qwen3_4B_lora_warmup/<key>.pt` using
 Skywork features in the shipped presets. All use the
-`swap_equivariant_abs_diff_v11` head architecture and warmup schema v5.
+`swap_equivariant_abs_diff_v9` head architecture and warmup schema v5.
 This head packs L/M into one projection for subtractive cross-projected wins.
-The tie takes the absolute values of their masked GELU activations as `C_A`
+The tie reuses their masked GELU activations, clamps them to nonnegative `C_A`
 and `C_B`, and computes
 `z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff`.
 The entire tie calculation runs in FP32 with autocast disabled, with
@@ -295,16 +295,16 @@ Xavier-initialized SR2 entries lack this field; harmonic/discrepancy heads use
 `scaled_uniform_zero_discrepancy_v1`. Both select different keys and remain on
 disk without reuse or migration. Initialization versioning
 does not change the head architecture, warmup schema v5, production-checkpoint
-compatibility, or other heads' cache identities. V11 retains v9's scaled uniform weights
+compatibility, or other heads' cache identities. V9 uses scaled uniform weights
 for L/M and the win readout and initializes the win projection bias to zero.
 The initial effective tie weights are sampled from
 `U(0.5 * mean, 1.5 * mean)`, with `mean = 0.2 / (3h)`, and encoded in `u`
 using `0.01 * invsoftplus(U_0 / 0.01)`. Scalar `raw_t` starts at
 `invsoftplus(2)`, giving `t = 3`, and unconstrained `tie_bias` starts at zero.
 See the [head definition](lora.md#swap-equivariant-head) for the stable inverse.
-The v11 architecture isolates earlier training states while retaining v9's
-initialization version, without changing storage schemas or migrating old files.
-Compatible v11 entries are shared by frozen SR2 builds and
+Together, the v9 architecture and new initialization version isolate v8 and
+earlier training states without changing storage schemas or migrating old files.
+Compatible v9 entries are shared by frozen SR2 builds and
 standalone/inline SR2 warmup when all identity fields match. Token, adapter-free feature, and batch-plan
 caches retain their own reuse rules because their representations are unchanged.
 
