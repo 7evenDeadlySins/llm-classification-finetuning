@@ -120,6 +120,13 @@ class HeadWarmupCache:
 		if config.warmup_build_min_lr != config.warmup_learning_rate:
 			metadata["warmup_lr_schedule"] = "exponential_endpoint_epoch_v2"
 			metadata["warmup_build_min_lr"] = config.warmup_build_min_lr
+		t_lr_multiplier = (
+			config.warmup_t_lr_multiplier
+			if isinstance(config, LoRAModelConfig)
+			else config.t_lr_multiplier
+		)
+		if t_lr_multiplier != 1.0:
+			metadata["t_lr_multiplier"] = t_lr_multiplier
 		# Preserve existing unsmoothed cache identities while isolating smoothed warmup.
 		label_smoothing = (
 			config.warmup_label_smoothing

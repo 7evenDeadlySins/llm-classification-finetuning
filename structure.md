@@ -325,13 +325,19 @@ present in a fresh checkout.
    packing passes stay within finalized update boundaries.
    Checkpointing is chosen once per A/B joint micro-batch through backward;
    both branch graphs are retained until one backward pass, and disabling
-   checkpointing removes input-gradient hooks. Joint groups share one learning
-   rate, holding it fixed for the first `lr_decay_delay_epochs` joint epochs
+   checkpointing removes input-gradient hooks. Joint adapters and the main head
+   group share one base learning rate, holding it fixed for the first
+   `lr_decay_delay_epochs` joint epochs
    (default `0`) before one cosine curve across the remaining updates. The total
    epoch count stays unchanged; a delay at least as large as `epochs` keeps the
    rate fixed throughout, and a single remaining update uses the initial rate.
    Each consumed optimizer group advances the schedule once, including
-   FP16-skipped updates. Head warmup and
+   FP16-skipped updates. The separate `raw_t` group always uses the current
+   base head rate times its stage's `t_lr_multiplier`, a finite number equal to
+   `0` or at least `1`, defaulting to `1.0`. Frozen SR2, warmup, and joint LoRA
+   resolve independent multipliers; the joint transition resets rates and switches
+   the `raw_t` multiplier. All schedulers derive rates from explicit group
+   multipliers. Head warmup and
    frozen SR2 builds derive exponential decay from `build_epochs` and `build_min_lr`,
    setting one rate at the start of each epoch. The first epoch uses the initial
    rate; for multiple epochs, the final epoch uses the minimum exactly. A single
@@ -342,7 +348,9 @@ present in a fresh checkout.
    fixed; joint training uses a minimum ratio of `1` for a fixed rate. Disabled
    warmup (`build_epochs: 0`) creates no head scheduler. Frozen SR2 validation
    steps ReduceLROnPlateau once after each complete unsmoothed validation loss,
-   with configurable `factor`/initial `patience` and fixed threshold/minimum rate of zero.
+   with configurable `factor`/initial `patience`, fixed threshold/minimum rate of
+   zero, and default `eps=1e-8`. Apply the epsilon gate to the main head rate;
+   each accepted reduction derives all group rates from that rate.
    The next epoch retains the resulting rate without an exponential reset;
    learning-rate reductions do not reset the early-stopping counter, while each
    completed `early_stopping` non-improving window with `patience > 0` decrements
@@ -366,6 +374,9 @@ present in a fresh checkout.
    executed warmup epoch evaluates its complete training set with
    final weights, dropout disabled, and warmup smoothing; validation remains
    unsmoothed. Publish head state only after these evaluations succeed.
+   Warmup cache metadata includes `t_lr_multiplier` only for non-default warmup
+   multipliers, including zero, preserving existing default keys and schema v5.
+   Joint multipliers do not affect warmup identity.
    Warmup caches retain optimizer state for warmup continuation. On entry to the
    first joint epoch, clear AdamW moments and step counters once, including after
    complete cache hits and partial-cache continuation. Preserve trained weights,

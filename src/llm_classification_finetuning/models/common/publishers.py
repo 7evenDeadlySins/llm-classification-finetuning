@@ -224,6 +224,7 @@ class ModelResultPublisher:
 				*LORA_WARMUP_FIELDS,
 				"warmup_extraction_budget",
 				"warmup_label_smoothing",
+				"warmup_t_lr_multiplier",
 			):
 				model_section.pop(key)
 			if model_config.ab_swap == "none":

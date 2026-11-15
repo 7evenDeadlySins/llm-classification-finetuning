@@ -95,6 +95,7 @@ class WarmupModelConfig:
 	dataloader_workers: int
 	ab_swap: str
 	label_smoothing: float = field(default=0.0, kw_only=True)
+	t_lr_multiplier: float = field(default=1.0, kw_only=True)
 	warmup_build_min_lr: float = field(kw_only=True)
 
 
@@ -114,6 +115,7 @@ class SR2ModelConfig:
 	dataloader_workers: int
 	ab_swap: str
 	label_smoothing: float = 0.0
+	t_lr_multiplier: float = field(default=1.0, kw_only=True)
 	build_epochs: int | None = field(default=None, kw_only=True)
 	max_grad_norm: float = field(kw_only=True)
 	build_min_lr: float = field(kw_only=True)
@@ -150,6 +152,7 @@ class LoRAModelConfig(WarmupModelConfig):
 	min_lr_ratio: float = field(default=0.125, kw_only=True)
 	lr_decay_delay_epochs: int = field(default=0, kw_only=True)
 	warmup_label_smoothing: float = field(default=0.0, kw_only=True)
+	warmup_t_lr_multiplier: float = field(default=1.0, kw_only=True)
 	gradient_checkpointing_threshold: int = 0
 	gradient_checkpointing_budget: int = 0
 
@@ -480,6 +483,9 @@ def _load_warmup_fields(
 		warmup_training_batch_size=positive_integer("warmup_training_batch_size"),
 		warmup_learning_rate=warmup_learning_rate,
 		warmup_build_min_lr=warmup_build_min_lr,
+		t_lr_multiplier=_require_t_lr_multiplier(
+			section.get("t_lr_multiplier", 1.0), field("t_lr_multiplier")
+		),
 		max_grad_norm=positive_float("max_grad_norm"),
 		random_state=_require_integer(
 			section.get("random_state"), field("random_state")
@@ -500,6 +506,7 @@ def _load_lora_model_config(
 		"ab_swap",
 		"warmup_extraction_budget",
 		"warmup_label_smoothing",
+		"warmup_t_lr_multiplier",
 		*LORA_WARMUP_FIELDS,
 	}
 	_reject_unknown_keys(section, keys, section_name)
@@ -572,6 +579,7 @@ def _load_lora_model_config(
 		**asdict(shared),
 		warmup_extraction_budget=warmup.extraction_budget,
 		warmup_label_smoothing=warmup.label_smoothing,
+		warmup_t_lr_multiplier=warmup.t_lr_multiplier,
 		training_batch_size=positive_integer("training_batch_size"),
 		head_inference_batch_size=positive_integer("head_inference_batch_size"),
 		gradient_accumulation_steps=positive_integer("gradient_accumulation_steps"),
@@ -708,6 +716,14 @@ def _require_float(value: Any, field_name: str) -> float:
 	if not math.isfinite(number):
 		raise ConfigurationError(f"{field_name} must be finite.")
 	return number
+
+
+def _require_t_lr_multiplier(value: Any, field_name: str) -> float:
+	"""Allow a zero rate for raw_t or a finite multiplier of at least one."""
+	multiplier = _require_float(value, field_name)
+	if multiplier != 0.0 and multiplier < 1.0:
+		raise ConfigurationError(f"{field_name} must be 0 or at least 1.")
+	return multiplier
 
 
 def _require_learning_rate(value: Any, field_name: str) -> float:

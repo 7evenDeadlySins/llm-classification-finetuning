@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from itertools import count
 from pathlib import Path
 from time import perf_counter
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -52,6 +52,7 @@ from .data import (
 	PairwiseFeatureStore,
 )
 from .extractor import LoRAEmbeddingExtractor
+from .heads import SR2
 from .model import LoRAQwenClassifier
 from .profile import PROFILE
 from .warmup_cache import HeadWarmupCache, WarmupCacheContext, WarmupCacheEntry
@@ -83,8 +84,51 @@ class _EpochTrainingLosses:
 	last_step_training_loss: float
 
 
+def _set_group_learning_rates(
+	parameter_groups: Sequence[dict[str, Any]], learning_rate: float
+) -> None:
+	"""Apply one base rate while preserving each group's explicit multiplier."""
+	learning_rates = [
+		learning_rate * group.get("lr_multiplier", 1.0) for group in parameter_groups
+	]
+	if any(not math.isfinite(rate) or rate < 0.0 for rate in learning_rates):
+		raise ModelExecutionError(
+			"Scaled optimizer learning rates must be finite and non-negative."
+		)
+	for group, rate in zip(parameter_groups, learning_rates):
+		group["lr"] = rate
+
+
+class _ProportionalReduceLROnPlateau(ReduceLROnPlateau):
+	"""Reduce the main head rate, then derive all group rates without drift."""
+
+	def __init__(
+		self,
+		optimizer: AdamW,
+		*,
+		reference_group: dict[str, Any],
+		factor: float,
+		patience: int,
+	) -> None:
+		self._reference_group = reference_group
+		super().__init__(
+			optimizer,
+			mode="min",
+			factor=factor,
+			patience=patience,
+			threshold=0,
+			min_lr=0,
+		)
+
+	def _reduce_lr(self, epoch: int) -> None:
+		old_learning_rate = float(self._reference_group["lr"])
+		learning_rate = old_learning_rate * self.factor
+		if old_learning_rate - learning_rate > self.eps:
+			_set_group_learning_rates(self.optimizer.param_groups, learning_rate)
+
+
 class _CosineLearningRateSchedule:
-	"""Hold then cosine-decay one shared rate per update, including FP16 skips."""
+	"""Hold then cosine-decay proportional group rates, including FP16 skips."""
 
 	def __init__(
 		self,
@@ -122,8 +166,7 @@ class _CosineLearningRateSchedule:
 				/ 2.0
 			)
 			learning_rate = self._learning_rate * multiplier
-		for group in self._optimizer.param_groups:
-			group["lr"] = learning_rate
+		_set_group_learning_rates(self._optimizer.param_groups, learning_rate)
 		self._step_index += 1
 
 
@@ -171,8 +214,7 @@ class _ExponentialLearningRateSchedule:
 			learning_rate = math.exp(
 				math.log(self._learning_rate) - self._decay_rate * epoch_index
 			)
-		for group in self._optimizer.param_groups:
-			group["lr"] = learning_rate
+		_set_group_learning_rates(self._optimizer.param_groups, learning_rate)
 
 
 class LoRATrainer:
@@ -519,14 +561,33 @@ class LoRATrainer:
 		warmup_validation: DataLoader[list[torch.Tensor]] | None = None
 		joint_validation_loader: DataLoader[BranchBatch] | None = None
 		lr_schedule: _CosineLearningRateSchedule | None = None
-		parameter_groups = [
-			{
-				"params": list(model.classifier.parameters()),
-				"lr": self._config.warmup_learning_rate
-				if self._warmup_only or warmup_epochs
-				else self._config.learning_rate,
-			}
-		]
+		head_only_initial = self._warmup_only or bool(warmup_epochs)
+		head_learning_rate = (
+			self._config.warmup_learning_rate
+			if head_only_initial
+			else self._config.learning_rate
+		)
+		t_lr_multiplier = (
+			self._config.warmup_t_lr_multiplier
+			if head_only_initial and isinstance(self._config, LoRAModelConfig)
+			else self._config.t_lr_multiplier
+		)
+		head_parameters = dict(model.classifier.named_parameters())
+		raw_t = head_parameters.pop("raw_t", None)
+		if model.head_architecture == SR2 and raw_t is None:
+			raise ModelExecutionError(
+				"The SR2 classifier is missing its raw_t parameter."
+			)
+		head_group: dict[str, Any] = {
+			"params": list(head_parameters.values()),
+			"lr_multiplier": 1.0,
+		}
+		parameter_groups = [head_group]
+		t_group = None
+		if raw_t is not None:
+			t_group = {"params": [raw_t], "lr_multiplier": t_lr_multiplier}
+			parameter_groups.append(t_group)
+		_set_group_learning_rates(parameter_groups, head_learning_rate)
 		if not self._warmup_only:
 			parameter_groups.insert(
 				0,
@@ -537,6 +598,7 @@ class LoRATrainer:
 						if parameter.requires_grad
 					],
 					"lr": self._config.learning_rate,
+					"lr_multiplier": 1.0,
 				},
 			)
 		optimizer = AdamW(parameter_groups, weight_decay=self._config.weight_decay)
@@ -551,13 +613,11 @@ class LoRATrainer:
 			else None
 		)
 		plateau_lr_schedule = (
-			ReduceLROnPlateau(
+			_ProportionalReduceLROnPlateau(
 				optimizer,
-				mode="min",
+				reference_group=head_group,
 				factor=plateau_factor,
 				patience=plateau_patience,
-				threshold=0,
-				min_lr=0,
 			)
 			if early_stopping is not None
 			else None
@@ -721,9 +781,12 @@ class LoRATrainer:
 				warmup_validation = None
 				loader = training.loader
 				# Joint training starts with fresh AdamW moments and step counters.
+				if t_group is not None:
+					t_group["lr_multiplier"] = self._config.t_lr_multiplier
+				_set_group_learning_rates(
+					optimizer.param_groups, self._config.learning_rate
+				)
 				optimizer.state.clear()
-				for group in optimizer.param_groups:
-					group["lr"] = self._config.learning_rate
 				joint_layout = OptimizerGroupLayout(
 					len(reference),
 					self._config.training_batch_size

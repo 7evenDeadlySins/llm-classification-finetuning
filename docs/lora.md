@@ -215,11 +215,12 @@ offsets/metadata. Current training inputs are checked independently.
 | Head warmup, cache miss | Load cached frozen features and extract missing branches with adapter forwards disabled; train only the head with epoch-based exponential decay from `warmup.learning_rate` to `warmup.build_min_lr` across `warmup.build_epochs`, keeping the rate fixed within each epoch | Evaluate the full training set and, for holdout runs, validation after each epoch using shared features; save completed head/optimizer/RNG state |
 | Head warmup, complete cache hit | Restore compatible head and training state | Inline LoRA skips all warmup work; standalone warmup loads cached features, extracts missing branches, and recomputes both losses without training |
 | Head warmup, lower-epoch cache hit (fixed rate only) | Load/extract frozen features, reconstruct shuffle state, and restore compatible head/optimizer/RNG state; train only remaining epochs | Evaluate after each remaining epoch and save a separate target-epoch cache, preserving the source |
-| Joint training | Clear AdamW moments and step counters once at entry, then train adapters and head with one shared cosine-decayed `learning_rate` | Fresh backbone extraction and head validation after each joint epoch |
+| Joint training | Clear AdamW moments and step counters once at entry, then train adapters and the main head group at the cosine-decayed base `learning_rate`, with a separate scaled rate for `raw_t` | Fresh backbone extraction and head validation after each joint epoch |
 | Full-data build | Same training stages on all original IDs from both partitions | No validation; save adapters/head after the final epoch |
 
 The shared warmup section supplies build epochs, head batch size, initial and
-minimum learning rates, extraction budget, and smoothing.
+minimum learning rates, the `raw_t` learning-rate multiplier, extraction budget,
+and smoothing.
 Inline warmup's remaining model/head settings come from the selected LoRA section.
 `warmup.build_epochs: 0` skips warmup extraction
 and cache I/O. See [standalone versus inline settings](configuration.md#standalone-warmup).
@@ -276,7 +277,21 @@ For warmup identity and restoration details, see [warmup caches](caching.md#lora
 
 Frozen SR2 builds and standalone/inline warmup use exponential decay
 once per epoch. LoRA joint training uses an independent cosine curve once per
-planned optimizer update.
+planned optimizer update. Each stage keeps `raw_t` in a separate AdamW
+parameter group, while all other classifier parameters remain in the main head
+group with their existing weight decay.
+
+| Stage | Base head rate | `raw_t` multiplier |
+| --- | --- | --- |
+| Frozen SR2 validation/build | Frozen section's plateau/exponential rate | `SR2_Qwen3_4B.t_lr_multiplier` |
+| Standalone/inline warmup | Warmup section's exponential rate | `warmup.t_lr_multiplier` |
+| LoRA joint training | LoRA section's cosine rate, shared with adapters | `SR2_Qwen3_4B_lora.t_lr_multiplier` |
+
+At every epoch or update, `raw_t_lr = base_head_lr * t_lr_multiplier`. Each
+multiplier defaults independently to `1.0` and must be finite and either `0` or
+at least `1`. A zero multiplier keeps `raw_t` at zero learning rate throughout
+that stage. The schedules derive group rates from the current base rate and
+explicit multipliers, including at a cosine endpoint of zero.
 
 For head training, let `N = build_epochs`, `L = learning_rate`, and
 `M = build_min_lr` in either the frozen SR2 or warmup section. For `N > 1`:
@@ -304,7 +319,11 @@ coefficient. `warmup.build_epochs: 0` skips the stage without creating a schedul
 
 Frozen SR2 validation uses ReduceLROnPlateau on the full unsmoothed validation
 loss after each epoch, with `factor: 0.95` and initial `patience: 2` as defaults
-and fixed `threshold=0` and `min_lr=0`. Reductions apply to the following epoch.
+and fixed `threshold=0` and `min_lr=0`, retaining the default `eps=1e-8`.
+Reductions apply to the following epoch. A proposed main head rate reduction
+of at most `eps` is ignored for all groups. Each accepted reduction computes
+the main head rate and then scales `raw_t` from it, preserving the configured
+multiplier.
 Whenever `early_stopping` consecutive epochs fail to strictly lower the overall
 best validation loss, `patience` decrements by `1` in place and the
 early-stopping counter resets while `patience > 0` (preserving model, optimizer,
@@ -318,7 +337,10 @@ and uses no head-state cache; see
 Decaying builds/warmup reuse only exact target-epoch caches. Changing the minimum
 rate or target epoch count changes the full curve and trains from epoch index
 `0` on a cache miss. Lower-epoch continuation remains supported only when
-`build_min_lr = learning_rate`.
+`build_min_lr = learning_rate`. A non-default warmup `t_lr_multiplier`, including
+zero, participates in cache identity; `1.0` adds no metadata key and retains
+existing cache compatibility. Changing only the joint multiplier preserves
+warmup cache reuse.
 
 Joint training uses `U = max(1, rows // G)` updates per epoch and `N = epochs * U`
 total updates, using the joint optimizer-group size `G` above.
@@ -343,12 +365,14 @@ skips the parameter update. Micro-batches and evaluation do not advance a
 schedule; warmup does not advance the joint schedule. Packing and short-tail
 merging retain the update counts above; epochs do not restart decay.
 
-At the start of joint training, both groups switch to `learning_rate` and begin
-a fresh cosine curve, whether warmup was executed, restored from cache, or
-disabled. Adapters and the classifier head retain separate optimizer parameter
-groups with the same joint learning rate. The classifier's AdamW state is
-retained. These joint-only settings do not change warmup cache identity or
-production checkpoint compatibility.
+At the start of joint training, adapters and the main head group switch to
+`SR2_Qwen3_4B_lora.learning_rate`; the `raw_t` group switches to that rate times
+`SR2_Qwen3_4B_lora.t_lr_multiplier`. They begin a fresh cosine curve whether
+warmup was executed, restored from cache, or disabled. This transition clears
+AdamW moments and step counters once while preserving the trained weights,
+parameter groups, GradScaler, and RNG state. Subsequent joint epochs retain
+their accumulated optimizer state. These joint-only settings do not change
+warmup cache identity or production checkpoint compatibility.
 
 ## Two-stage validation
 

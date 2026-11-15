@@ -118,6 +118,7 @@ The following names apply independently inside each relevant section.
 | `label_smoothing` | All model sections and `warmup` | Number in `[0, 1]`; default `0.0` |
 | `training_batch_size` | Frozen SR2, LoRA, and `warmup` | Positive integer |
 | `learning_rate` | Frozen SR2, LoRA, and `warmup` | Positive finite number or a string power expression resolving to one; see below |
+| `t_lr_multiplier` | Frozen SR2, LoRA, and `warmup` | Finite numeric value equal to `0` or at least `1`; default `1.0`; multiplier for the classifier's `raw_t` learning rate relative to the main head rate |
 | `epochs` | LoRA joint training | Required positive integer |
 | `build_epochs` | Frozen SR2 and `warmup` | Positive integer for frozen SR2 builds; optional or `null` for frozen SR2 validation; required non-negative integer for warmup, where `0` disables the inline stage |
 | `early_stopping` | Frozen SR2 validation | Positive integer; default `7`; non-improving epoch window per `patience` stage before stepping `patience` down by `1` or stopping when `patience = 0` |
@@ -181,13 +182,14 @@ build_min_lr: "10 ** -4"
 
 Both SR2 sections reject `head_learning_rate`, `A/B_swap`, and the
 `warmup_*` optimization keys.
-Internal `ab_swap`, `warmup_extraction_budget`, and `warmup_label_smoothing` are
-not YAML fields. See [migration](migration.md) for retired keys.
+Internal `ab_swap`, `warmup_extraction_budget`, `warmup_label_smoothing`, and
+`warmup_t_lr_multiplier` are not YAML fields. See [migration](migration.md) for retired keys.
 
 `SR2_Qwen3_4B` trains only the SR2 head with mode-specific learning-rate decay,
 using `training_batch_size` for both optimization groups and head inference.
 It accepts the common model fields above, `build_epochs`, `early_stopping`, `factor`, `patience`,
-`training_batch_size`, `learning_rate`, `build_min_lr`, and `max_grad_norm`; it rejects LoRA,
+`training_batch_size`, `learning_rate`, `t_lr_multiplier`, `build_min_lr`, and
+`max_grad_norm`; it rejects LoRA,
 joint-training, and `warmup_*` controls.
 Its independent section needs neither `warmup` nor `SR2_Qwen3_4B_lora`.
 Shipped values were copied once from each preset's warmup settings; changing
@@ -224,13 +226,17 @@ triggers one; at `patience: 0`, every non-improving epoch triggers one. Strictly
 lower losses count as improvements; ties do not. Rate reductions do not reset the
 early-stopping counter, and early-stopping stage transitions preserve scheduler
 state other than decrementing `patience`. Other scheduler parameters retain
-PyTorch defaults, including `cooldown=0`, `threshold_mode="rel"`, and `eps=1e-8`;
-a smaller proposed rate change is ignored. Boolean values are rejected for `factor`
-and `patience`. `threshold` and `min_lr` are not YAML fields. Effective `config.yaml`
+PyTorch defaults, including `cooldown=0`, `threshold_mode="rel"`, and `eps=1e-8`.
+A proposed main head rate reduction of at most `eps` is ignored for all groups.
+Each accepted reduction computes the main head rate first and derives the
+`raw_t` rate from its configured multiplier. Boolean values are rejected for `factor` and `patience`.
+`threshold`, `min_lr`, and `eps` are not YAML fields. Effective `config.yaml`
 snapshots record the configured initial `patience`. Validation does not apply
 `build_epochs` or `build_min_lr`; builds do not use `factor` or `patience`.
 
-Joint training uses `learning_rate` for both adapters and the classifier head.
+Joint training uses `learning_rate` as the base rate for adapters and the main
+classifier head group. The separate `raw_t` group uses this rate multiplied by
+`SR2_Qwen3_4B_lora.t_lr_multiplier`.
 `lr_decay_delay_epochs` keeps the first configured number of joint epochs at that
 initial rate, then one cosine curve spans the remaining planned optimizer updates.
 The total `epochs` stays unchanged, and head warmup has its own independent
@@ -240,6 +246,22 @@ updates remain after the delay, the first uses the initial rate and the final
 uses `learning_rate * min_lr_ratio`. A single remaining update uses the initial
 rate. `min_lr_ratio: 0` decays to zero, while `1` keeps the rate fixed. Omitting
 `min_lr_ratio` uses `0.125`.
+
+Each of `SR2_Qwen3_4B`, `warmup`, and `SR2_Qwen3_4B_lora` has its own
+`t_lr_multiplier`. Frozen validation/builds use the frozen section's multiplier;
+standalone and inline warmup use `warmup.t_lr_multiplier`; joint training uses
+the LoRA section's multiplier. Entering joint training resets the base rate and
+switches to the joint multiplier, including after a warmup cache hit or when
+warmup is disabled. At every stage, `raw_t_lr = main_head_lr * t_lr_multiplier`;
+exponential, cosine, and plateau scheduling preserve this relationship. Thus
+`build_min_lr` and `learning_rate * min_lr_ratio` describe the main head minimum,
+and the `raw_t` minimum is scaled by the same multiplier.
+
+A multiplier of `0` keeps `raw_t` in its optimizer group at zero learning rate;
+its value stays fixed during that stage. The default `1.0` gives it the main
+head rate. Values between `0` and `1`, negative or non-finite numbers, Booleans,
+and strings (including power expressions) are rejected. A non-finite scaled
+learning rate is rejected before optimization at that stage.
 
 Frozen SR2 builds derive exponential decay from their independent `build_epochs`
 and `build_min_lr`. Standalone and inline head warmup use the corresponding fields
@@ -288,6 +310,7 @@ SR2 takes exactly these controls from `warmup`:
 | `build_epochs` | Target head-only epochs; exponential decay reuses only the exact target, while fixed-rate training can continue from a compatible lower epoch; `0` disables warmup and its cache I/O |
 | `training_batch_size` | Head forward batch size during warmup |
 | `learning_rate` | Initial warmup head learning rate |
+| `t_lr_multiplier` | Independent `raw_t` rate multiplier during standalone and inline warmup; default `1.0`; accepts `0` or a finite number at least `1` |
 | `build_min_lr` | Absolute final-epoch head learning rate; defaults to `warmup.learning_rate / 5`; equal to the initial rate for fixed-rate training; independent of frozen SR2 and joint `min_lr_ratio` |
 | `extraction_budget` | Warmup backbone extraction token budget |
 | `label_smoothing` | Warmup training objective |

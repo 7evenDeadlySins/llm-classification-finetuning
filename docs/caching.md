@@ -336,12 +336,21 @@ remain unchanged; reuse requires the training-label digest described below.
 | --- | --- |
 | Sorted actual training ID set and corresponding labels; supplemental Parquet content when enabled | Validation-only IDs/labels, holdout/build label, source path/Parquet bytes, row order, training text |
 | Exact Hub model/revision or local weight/configuration content, hidden dimensions, tokenizer content, serializer, head architecture, SR2 initialization version, quantization, schema | Local path spelling when contents match |
-| Head dropout, A/B objective, warmup build epochs/batch size/initial rate, exponential schedule version and absolute minimum rate when decay is enabled, seed, weight decay, clipping, nonzero warmup label smoothing | Compute precision, attention, TF32, extraction budget, context ceiling |
-| Non-quantized training identity for active profiles | LoRA rank/alpha/dropout/targets; joint learning rates, epochs, batch size, accumulation, and token controls |
+| Head dropout, A/B objective, warmup build epochs/batch size/initial rate, exponential schedule version and absolute minimum rate when decay is enabled, seed, weight decay, clipping, nonzero warmup label smoothing, non-default warmup `t_lr_multiplier` | Compute precision, attention, TF32, extraction budget, context ceiling |
+| Non-quantized training identity for active profiles | LoRA rank/alpha/dropout/targets; joint learning rates and `t_lr_multiplier`, epochs, batch size, accumulation, and token controls |
 
 Warmup epochs remain part of each stored key. A lower-epoch entry is compatible
 as a continuation source only for fixed-rate training and when every other
 identity field matches.
+
+The effective warmup `t_lr_multiplier` is included under that metadata key only
+when it differs from `1.0`, including when it is `0.0`. Frozen builds use their
+own section's multiplier; standalone and inline warmup use
+`warmup.t_lr_multiplier`. Different warmup multipliers select different head
+states and continuation sources, while the default adds no key and preserves
+existing cache identities and schema v5. Changing only the LoRA joint multiplier
+does not affect warmup identity. Token and frozen-feature caches are independent
+of this head optimization setting.
 
 The required `WarmupCacheContext.training_labels_sha256` hashes original
 `(id, label)` pairs in ascending ID order as a contiguous two-column little-endian
