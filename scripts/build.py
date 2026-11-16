@@ -68,7 +68,9 @@ def _build(data_source_root: Path | None = None) -> int:
 				app_config = AppConfig.load(config)
 				processed_path = app_config.data.processed_path
 				supplement_path = (
-					app_config.data.build_supplement_path if model != "warmup" else None
+					app_config.data.build_supplement_path
+					if model != "warmup"
+					else app_config.data.train_supplement_path
 				)
 				preparation_key = (processed_path, supplement_path)
 				if preparation_key not in prepared_paths:

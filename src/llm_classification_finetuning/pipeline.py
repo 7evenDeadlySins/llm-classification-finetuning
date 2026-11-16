@@ -55,8 +55,13 @@ class EnsureProcessedDataPipeline:
 		include_build_supplement: bool = False,
 	) -> None:
 		self._storages = [CacheStorage(config.data.processed_path)]
-		if include_build_supplement and config.data.build_supplement_path is not None:
-			self._storages.append(CacheStorage(config.data.build_supplement_path))
+		supplement_path = (
+			config.data.build_supplement_path
+			if include_build_supplement
+			else config.data.train_supplement_path
+		)
+		if supplement_path is not None:
+			self._storages.append(CacheStorage(supplement_path))
 		self._project_root = project_root.resolve()
 		# Resolve the source only after a local miss, avoiding access to Drive on hits.
 		self._source_root = source_root
@@ -64,7 +69,7 @@ class EnsureProcessedDataPipeline:
 	def run(
 		self, on_copy: Callable[[Path, Path], None] | None = None
 	) -> tuple[Path, ...]:
-		"""Ensure all requested artifacts, without accessing build data on validation."""
+		"""Ensure the real dataset and the supplement selected for this training mode."""
 		return tuple(
 			path
 			for storage in self._storages

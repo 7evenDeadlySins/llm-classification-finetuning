@@ -126,8 +126,8 @@ runtime available for recovery and retry.
 
 Both notebooks default `DRIVE_DATA_ROOT` to
 `/content/drive/MyDrive/llm-classification-finetuning`. This directory mirrors the
-project root: the prebuilt LMSYS33K artifact belongs at
-`<DRIVE_DATA_ROOT>/data/processed/lmsys33k/train_validation.parquet`, or its
+project root: the merged real preference artifact belongs at
+`<DRIVE_DATA_ROOT>/data/processed/external_merged/train_validation.parquet`, or its
 `.manifest.json` and referenced `.parts/` volumes. Change the settings cell to use
 a different mirror root.
 
@@ -137,7 +137,8 @@ used without accessing the Drive data mirror, so repository-backed configuration
 can run in the same `MODEL_CONFIGS` batch. For example, a model
 selection can list both `"1.yaml"` and `"2.yaml"` in order. Model builds also
 restore the configured build supplement from the mirror; validation and
-standalone warmup require only the original dataset.
+standalone warmup restore the configured train supplement. Each mode also
+requires the saved real dataset.
 
 Only missing files or wrong-sized volumes are copied into the runtime. A local
 manifest determines the required volumes, including when Drive only contains the

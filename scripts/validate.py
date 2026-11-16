@@ -53,7 +53,7 @@ def _validate(data_source_root: Path | None = None) -> int:
 
 	config_dir = PROJECT_ROOT / CONFIG_DIR
 	failed_tasks: list[str] = []
-	prepared_paths: set[Path] = set()
+	prepared_paths: set[tuple[Path, Path | None]] = set()
 	for model, configs in MODEL_CONFIGS.items():
 		for filename in configs:
 			config = config_dir / filename
@@ -65,7 +65,11 @@ def _validate(data_source_root: Path | None = None) -> int:
 			try:
 				app_config = AppConfig.load(config)
 				processed_path = app_config.data.processed_path
-				if processed_path not in prepared_paths:
+				preparation_key = (
+					processed_path,
+					app_config.data.train_supplement_path,
+				)
+				if preparation_key not in prepared_paths:
 					print(
 						f"Preparing processed data for {task} ({config}): {processed_path}",
 						flush=True,
@@ -79,7 +83,7 @@ def _validate(data_source_root: Path | None = None) -> int:
 							f"Copying processed data: {source} -> {target}", flush=True
 						)
 					)
-					prepared_paths.add(processed_path)
+					prepared_paths.add(preparation_key)
 					print(
 						f"Processed data ready: {processed_path}; copied {len(copied)} files.",
 						flush=True,
@@ -111,13 +115,13 @@ def _validate(data_source_root: Path | None = None) -> int:
 						print(line, end="", flush=True)
 					returncode = process.wait()
 			except OSError as error:
-				prepared_paths.discard(processed_path)
+				prepared_paths.discard(preparation_key)
 				failed_tasks.append(task)
 				print(f"Failed holdout validation for {task}: {error}", flush=True)
 				continue
 			if returncode:
 				# A failing loader can archive data; later tasks must check it again.
-				prepared_paths.discard(processed_path)
+				prepared_paths.discard(preparation_key)
 				failed_tasks.append(task)
 				print(
 					f"Failed holdout validation for {task} (exit code {returncode})",

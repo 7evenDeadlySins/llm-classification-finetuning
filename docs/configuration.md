@@ -26,13 +26,14 @@ This process-wide allocator setting requires a fresh process to take effect.
 | --- | --- | --- |
 | `--config PATH` | `./config.yaml` | Selected complete YAML file |
 | `data.raw_dir` | Required YAML path; root preset `data/raw` | Raw competition CSVs |
-| `data.processed_path` | Required YAML `.parquet` path; root preset `data/processed/lmsys33k/train_validation.parquet` | Saved train/validation data, including multipart layout |
-| `data.build_supplement_path` | Optional YAML path; current presets `data/synthetic_tie/lmsys33k/synthetic_ties.parquet` | Independent synthetic tie rows for model builds |
+| `data.processed_path` | Required YAML `.parquet` path; root preset `data/processed/external_merged/train_validation.parquet` | Saved train/validation data, including multipart layout |
+| `data.train_supplement_path` | Optional YAML path | Independent synthetic ties for validation training and standalone warmup |
+| `data.build_supplement_path` | Optional YAML path | Independent synthetic ties for full-data model builds |
 | `MODEL_PATH` | Optional environment or `.env`; missing/blank uses native HF settings | Downloaded model/config/tokenizer cache |
 | `HF_HUB_OFFLINE` | Environment or `.env`; runtime template and Colab validation/build use `1` | Load required HF files locally without Hub requests; use `0` in a separate download process to fill missing files |
 | `CACHE_PATH` | Environment or `.env`; missing/blank uses `./cache` | Tokens, frozen/warmup features, LoRA batch plans, and head-warmup states |
 | `RESULT_PATH` | Environment or `.env`; missing/blank uses `./results` | Validation runs, comprehensive reports, and batch-run logs |
-| Production checkpoints | `./models/SR2_Qwen3_4B/`, `./models/SR2_Qwen3_4B_lora/` | Frozen head or LoRA adapter/pooling/head files |
+| Production checkpoints | `./models/SR2_Qwen3_4B/`, `./models/SR2_Qwen3_4B_lora/` | Frozen head or LoRA adapter/head files |
 
 `RESULT_PATH` follows the same path rules as `CACHE_PATH`: surrounding
 whitespace is stripped, `~` expands, and relative values resolve from the process
@@ -80,7 +81,8 @@ Booleans. Unquoted strings such as `bf16`, `sdpa`, and `cuda:0` are valid.
 | `data.competition` | Nonempty string |
 | `data.raw_dir` | Nonempty path |
 | `data.processed_path` | Nonempty path ending in `.parquet` |
-| `data.build_supplement_path` | Separate `.parquet` path or `null`; default `null`. Appended only by model builds; ignored by validation and standalone warmup |
+| `data.train_supplement_path` | Separate `.parquet` path or `null`; default `null`. Appended to training during validation and standalone warmup; frozen validation is unchanged |
+| `data.build_supplement_path` | Separate `.parquet` path or `null`; default `null`. Full-data builds append this artifact instead of the train supplement. Both supplement paths must differ from the real table and use separate, non-nested directories |
 | `validation.random_state` | Integer |
 | `validation.validation_fraction` | Number in `(0, 1)`; default `0.2` |
 | `validation.tokenizer_name` | Hub ID or local tokenizer directory with a chat template; default `Skywork/Skywork-Reward-V2-Qwen3-4B` |
@@ -132,19 +134,7 @@ The following names apply independently inside each relevant section.
 | `lora_rank`, `lora_alpha` | LoRA | Positive integers |
 | `lora_dropout` | LoRA | Number in `[0, 1)` |
 | `lora_target_modules` | LoRA | Nonempty list of unique nonempty strings |
-| `cross_attention_dim` | LoRA joint pooling | Positive integer; default `256`; combined width of Q/K/V projections |
-| `cross_attention_heads` | LoRA joint pooling | Positive integer dividing `cross_attention_dim`; default `4` |
-| `cross_attention_lr_multiplier` | LoRA joint pooling | Finite positive number; default `10.0`; its product with `learning_rate` must also be finite and positive |
 | `gradient_checkpointing_threshold`, `gradient_checkpointing_budget` | LoRA | Integers at least `0`; each defaults to `0` |
-
-Cross-attention is shared by A/B in joint training, joint validation, and
-production inference. It uses `dropout` for one residual mask shared across both
-branches; attention dropout is zero. Projection weights use `weight_decay`;
-LayerNorm parameters use zero decay. Both groups retain
-`cross_attention_lr_multiplier` through the joint delay and cosine schedule,
-including the `min_lr_ratio` endpoint. These fields do not affect frozen SR2,
-warmup features, or completed warmup cache identities. See
-[pooling architecture and precision](lora.md#last-token-query-cross-attention-pooling).
 
 `warmup` additionally requires `build_epochs` (integer at least `0`),
 `training_batch_size` (positive integer), `learning_rate` (as above), and
@@ -398,12 +388,6 @@ The DP uses linear extra space and quadratic time in the worst case; descending
 lengths make each interval's maximum its first length and bound feasible cuts by
 the budget. This shared sampler also handles retained frozen-model extraction.
 Features are scattered back to their original pair positions.
-
-Joint extraction applies the trained cross-attention pooler and stores its
-FP32 `[D]` outputs in temporary CPU memory. Frozen/warmup extraction continues
-to use last-token features with its existing storage dtype. Full-sequence
-cross-attention normalization raises joint GPU memory use; extraction and joint
-training token budgets need reassessment for the available hardware.
 
 LoRA rejects empty or over-limit branches and never truncates. Extraction plans
 stay in memory. Changing the extraction budget does not invalidate tokens,

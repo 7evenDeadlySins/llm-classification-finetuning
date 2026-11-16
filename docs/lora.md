@@ -2,11 +2,10 @@
 
 [Documentation index](../README.md)
 
-SR2 trains adapters, a shared cross-attention pooler, and a three-class comparison
-head over one Skywork reward-trained Qwen3 backbone. Original base parameters remain frozen;
+SR2 trains adapters and a three-class comparison head over
+one Skywork reward-trained Qwen3 backbone. Original base parameters remain frozen;
 training is non-quantized on one GPU. Each pair is serialized as separate A and B
-branches. Warmup pools the last real token; joint training and validation use it
-as a query over all real tokens. Both stages train on **original rows
+branches and pooled at the last real token. Both stages train on **original rows
 only**; validation makes one head prediction per ID.
 
 ```shell
@@ -34,72 +33,6 @@ differ between presets; read their actual values.
 SR2 and the standalone `warmup` command use the same SR2 cache namespace.
 The shipped presets select Skywork for both; reuse additionally requires
 matching training IDs, labels, and effective model/head settings.
-
-## Last-token query cross-attention pooling
-
-Joint training, joint validation, and production inference insert one shared
-`LastTokenQueryCrossAttention` between the backbone and the comparison head.
-The input $H\in\mathbb{R}^{B\times L\times D}$ is the complete backbone output
-**after** its final RMSNorm; $D$ comes from the backbone configuration (2,560 for
-the shipped Skywork model). `last_positions` selects $h_{last}$ and defines the
-valid-token mask, including that last real token itself.
-
-```mermaid
-flowchart LR
-    H["Backbone output H, after final RMSNorm"] --> Mode{"Stage"}
-    Mode -->|Frozen / warmup| Last["Last real token: existing cached D-vector"]
-    Mode -->|Joint / inference| Pool["Shared last-token-query cross-attention"]
-    Last --> Head["SR2 v9 comparison head"]
-    Pool --> Head
-```
-
-Separate affine LayerNorms normalize the query and full sequence in FP32, with
-`eps=1e-5`, weights initialized to one, and biases to zero:
-
-$$
-Q=\mathrm{LN}_Q(h_{last})W_Q,\qquad
-K=\mathrm{LN}_{KV}(H)W_K,\qquad V=\mathrm{LN}_{KV}(H)W_V.
-$$
-
-The bias-free projections map $D$ to `cross_attention_dim` (default 256), split
-into `cross_attention_heads` heads (default 4, each of width $d_h=64$). Per head:
-
-$$
-A=\operatorname{softmax}\left(
-\operatorname{mask}\left(QK^\top/\sqrt{d_h},\ j\le last\_position,\ -\infty\right)
-\right),\qquad
-O=\operatorname{Concat}_{heads}(AV)W_O.
-$$
-
-There is no attention dropout and no additional causal mask: the single query
-may attend to every real token. $W_O$ is bias-free and maps the concatenated
-attention vector back to $D$. The output is
-$h_{out}=h_{last}+O\odot m_R$, without a gate or post-residual LayerNorm.
-During paired training, one FP32 `[B, D]` residual dropout mask $m_R$, using
-`config.dropout` and standard dropout scaling, is shared by A and B. Thus the
-pooling operation exchanges A/B outputs under the same mask; the SR2 head also
-shares its own win mask. Evaluation disables both masks.
-
-Q/K/V weights use Xavier uniform initialization; $W_O$ starts at zero. For finite
-intermediates, the initial pooled values equal the old last-token values. On the
-first backward pass, the attention branch's Q/K/V and LayerNorm loss gradients
-are zero; $W_O$ can learn immediately and opens the upstream gradient path on
-later updates. The pooler adds $4D\,cross\_attention\_dim+4D$ parameters
-(2,631,680 with the defaults).
-
-Parameters, gradients, and AdamW moments remain FP32. Projection matmuls and
-$AV$ follow `gpu.precision`; probabilities are cast to the value dtype for
-$AV$. Both Pre-LNs, the QK matmul (promoted **before** multiplication), scaling,
-masking, softmax, and residual fusion run with autocast disabled in FP32.
-Joint pooled features stay FP32 through temporary CPU validation storage; the
-head retains its existing BF16/FP32 input computation policy.
-
-Frozen SR2 and standalone/inline warmup explicitly bypass this module and retain
-their existing `[D]` disk features and head-state cache identities. Joint models
-initialize the pooler after the existing head inside an RNG-preserving scope;
-pooler construction does not advance head/warmup random state. No full-sequence
-features are cached. Pooling selection is explicit and independent of `eval()`
-or disabled gradients, so joint validation still uses the trained pooler.
 
 ## Swap-equivariant head
 
@@ -173,7 +106,7 @@ Returned logits remain FP32 in the order A-win, B-win, tie.
 Checkpoints save `u`, `raw_t`, and `tie_bias` alongside L/M/R and the win bias.
 The architecture marker is
 `swap_equivariant_abs_diff_v9`, with embedding combination
-`cross_projected_clamped_win_sum_diff`; adapter/pooling/head checkpoint schema is v3,
+`cross_projected_clamped_win_sum_diff`; adapter/head checkpoint schema is v2,
 frozen-head schema is v1, and warmup schema is v5. The marker selects different
 warmup cache keys and rejects earlier checkpoints without converting their
 weights. Exact parameter-name/shape checks additionally reject earlier layouts,
@@ -193,11 +126,9 @@ There is no `A/B_swap` setting or orientation averaging for SR2.
 Validation/build uses [`gpu.device`](configuration.md#gpu-configuration). All
 branches are right-padded independently without padding masks. Qwen's causal attention
 protects real tokens from right padding, and CPU-computed last-real-token
-positions select the warmup feature or the joint pooler's query and valid keys.
-The backbone still receives no padding mask; the pooler masks padded keys.
-KV caching is disabled. Joint training encodes
+positions select pooled features. KV caching is disabled. Joint training encodes
 A then B while retaining both gradient graphs. The head consumes both features,
-and one backward pass computes gradients for the head, shared pooler, and adapters.
+and one backward pass computes gradients for the head and shared adapters.
 
 LoRA **never truncates**. Token preparation validates full canonical branches
 before training, and inference checks its inputs before encoding. Empty or
@@ -218,9 +149,9 @@ rebuilding.
 
 | Precision | Backbone / pooled CPU features | Trainable state and head computation |
 | --- | --- | --- |
-| `bf16` | BF16 backbone residuals/checkpoint inputs and frozen/warmup features; FP32 joint pooled features | FP32 parameters, gradients, and AdamW moments; BF16 pooler projections and head computation; FP32 pooling normalization/scores/residuals and logits |
-| `fp16` | FP16 backbone compute; FP32 pooled features | FP32 trainable state and head with gradient scaling; FP16 pooler projections, FP32 normalization/scores/residuals |
-| `fp32` | FP32 | FP32 pooler, head, and trainable state |
+| `bf16` | BF16 residuals, checkpoint inputs, and features | FP32 parameters, gradients, and AdamW moments; BF16 head autocast; FP32 logits |
+| `fp16` | FP16 backbone compute; FP32 pooled features | FP32 head/state with gradient scaling |
+| `fp32` | FP32 | FP32 head/state |
 
 BF16 support is checked on each selected GPU. BF16 LoRA models disable PEFT's
 input dtype upcasting once after adapter initialization, fixing the policy for
@@ -232,9 +163,7 @@ Absolute values, Softplus transforms, and final logit arithmetic remain FP32 in 
 
 With `sdpa`, LoRA permits Flash, memory-efficient, and cuDNN backends and disables
 math fallback during warmup, joint training, validation, and
-backbone checkpoint recomputation. The single-query pooler computes explicit
-linear-size scores separately from these backbone SDPA restrictions.
-Unsupported fused backbone inputs fail explicitly. Scoped flags
+checkpoint recomputation. Unsupported fused inputs fail explicitly. Scoped flags
 are restored on exit; explicit `eager` attention is available. Training/validation
 keep their native GQA policy.
 
@@ -253,9 +182,11 @@ branches of all original training rows, before augmentation:
 | Longest branch | 13,866 tokens |
 | Canonical A+B token total | 44,873,727 |
 
-The longest branch is A for ID `2995198009`. All current presets set both warmup
-and SR2 `max_length` to 13,866. New training inputs must still pass the normal
-length checks. The matching saved split and its fingerprint are documented under
+The longest Kaggle branch is A for ID `2995198009`. Current presets consume the
+[merged real preference dataset](data-preparation.md#merged-external-preferences)
+and set warmup and SR2 `max_length` to its measured maximum complete branch length.
+Long external samples are retained without truncation. The Kaggle-only saved
+split and its fingerprint are documented under
 [data preparation](data-preparation.md#saved-sr2-split-2026-10-27).
 
 ### Historical plain-text inputs
@@ -286,8 +217,8 @@ offsets/metadata. Current training inputs are checked independently.
 | Head warmup, cache miss | Load cached frozen features and extract missing branches with adapter forwards disabled; train only the head with epoch-based exponential decay from `warmup.learning_rate` to `warmup.build_min_lr` across `warmup.build_epochs`, keeping the rate fixed within each epoch | Evaluate the full training set and, for holdout runs, validation after each epoch using shared features; save completed head/optimizer/RNG state |
 | Head warmup, complete cache hit | Restore compatible head and training state | Inline LoRA skips all warmup work; standalone warmup loads cached features, extracts missing branches, and recomputes both losses without training |
 | Head warmup, lower-epoch cache hit (fixed rate only) | Load/extract frozen features, reconstruct shuffle state, and restore compatible head/optimizer/RNG state; train only remaining epochs | Evaluate after each remaining epoch and save a separate target-epoch cache, preserving the source |
-| Joint training | Clear AdamW moments and step counters once at entry, then train adapters and the main head group at the cosine-decayed base `learning_rate`, with separate scaled rates for `raw_t` and cross-attention | Fresh backbone and cross-attention extraction, then head validation after each joint epoch |
-| Full-data build | Same training stages on all original IDs from both partitions | No validation; save adapters/pooling/head after the final epoch |
+| Joint training | Clear AdamW moments and step counters once at entry, then train adapters and the main head group at the cosine-decayed base `learning_rate`, with a separate scaled rate for `raw_t` | Fresh backbone extraction and head validation after each joint epoch |
+| Full-data build | Same training stages on all original IDs from both partitions | No validation; save adapters/head after the final epoch |
 
 The shared warmup section supplies build epochs, head batch size, initial and
 minimum learning rates, the `raw_t` learning-rate multiplier, extraction budget,
@@ -364,16 +295,6 @@ at least `1`. A zero multiplier keeps `raw_t` at zero learning rate throughout
 that stage. The schedules derive group rates from the current base rate and
 explicit multipliers, including at a cosine endpoint of zero.
 
-Joint cross-attention uses two additional AdamW groups at
-`base_head_lr * cross_attention_lr_multiplier` (default multiplier `10.0`).
-Q/K/V/O weights use the LoRA section's `weight_decay`; both LayerNorms have zero
-weight decay. The existing group-multiplier mechanism preserves these rates
-when entering joint training and throughout its delay and cosine decay,
-including the same `min_lr_ratio` endpoint. Warmup bypasses the pooler and never
-creates its gradients or optimizer moments. Its groups are added only when
-entering joint training. The first joint epoch clears all
-optimizer moments once, preserving weights and the independent `raw_t` rate.
-
 For head training, let `N = build_epochs`, `L = learning_rate`, and
 `M = build_min_lr` in either the frozen SR2 or warmup section. For `N > 1`:
 
@@ -448,9 +369,7 @@ merging retain the update counts above; epochs do not restart decay.
 
 At the start of joint training, adapters and the main head group switch to
 `SR2_Qwen3_4B_lora.learning_rate`; the `raw_t` group switches to that rate times
-`SR2_Qwen3_4B_lora.t_lr_multiplier`, and the two cross-attention groups enter at
-the base rate times `cross_attention_lr_multiplier`. They begin a fresh cosine
-curve whether
+`SR2_Qwen3_4B_lora.t_lr_multiplier`. They begin a fresh cosine curve whether
 warmup was executed, restored from cache, or disabled. This transition clears
 AdamW moments and step counters once while preserving the trained weights,
 parameter groups, GradScaler, and RNG state. Subsequent joint epochs retain
@@ -460,8 +379,7 @@ warmup cache identity or production checkpoint compatibility.
 ## Two-stage validation
 
 Each joint-validation call extracts canonical A/B features using the current
-adapters and shared cross-attention pooler, then runs the head over original IDs.
-Backbone extraction uses the
+adapters, then runs the head over original IDs. Backbone extraction uses the
 selected LoRA section's `extraction_budget`; head inference uses `head_inference_batch_size`.
 
 Extraction completes before head inference, stores temporary CPU features, and
@@ -527,10 +445,6 @@ threshold too high can exceed GPU memory because non-checkpointed batches keep
 both branches' full activations. Lower the positive threshold, or set it to `0`
 to force gradient checkpointing on all joint batches.
 Warmup and inference disable checkpointing.
-
-The same per-pair decision also checkpoints each branch's cross-attention
-forward, with its already drawn shared residual mask supplied as an input.
-Recomputation does not draw a new residual mask.
 
 ### Epoch groups and the second packing pass
 
@@ -649,18 +563,10 @@ large enough for required inputs. FP16/BF16 can reduce memory where supported;
 checkpointing affects joint training only. The implementation reports OOM
 rather than silently changing precision or shortening inputs.
 
-Cross-attention retains full-sequence information and adds FP32 Pre-LN buffers,
-so training and joint-validation peaks exceed those of last-token slicing.
-One FP32 `[tokens, D]` buffer costs `4 * tokens * D` bytes. Checkpointing also
-covers the pooler on checkpointed joint batches, but cannot remove its temporary
-forward buffers. Reassess token budgets for the available GPU; the shipped
-budgets have not been benchmarked for this pooling architecture.
-
 ## Checkpoints
 
 `--build` atomically writes `models/SECTION/adapter.pt`, or `adapter_TAG.pt` for
-a checkpoint tag. Schema v3 contains `adapter_state_dict`, FP32
-`pooling_state_dict`, FP32 `head_state_dict`, and compatibility metadata;
+a checkpoint tag. It contains adapters, the FP32 head, and compatibility metadata;
 base weights are exported separately as described below. Optimizer state is
 not stored. These are inference artifacts, not checkpoints for resuming
 interrupted joint training.
@@ -675,20 +581,14 @@ the probe nor readback loads base weights or runs inference.
 
 CPU readback checks model name, serializer, classifier width/dropout, head
 architecture, LoRA rank/alpha/dropout/targets, schema/classes, pooling/truncation
-policy, bias, and `training_quantization: none`. Pooling identity is
-`last_token_query_cross_attention_v1`; attention dimension and head count must
-match independently, even when tensor shapes alone would allow another head
-count. Readback checks head names/shapes and all pooler tensor names, shapes,
-FP32 dtypes, and finite values, and records the saved Hub base revision. Local base weights are
+policy, bias, and `training_quantization: none`. It also checks head tensor
+names/shapes and records the saved Hub base revision. Local base weights are
 neither embedded nor content-fingerprinted by the production checkpoint.
 
 `max_length` and internal `ab_swap` are recorded but excluded from readback
 compatibility comparisons. Device, precision, attention, TF32, batches, and
 accumulation are also outside these comparisons. Historical quantized or
-retired-head checkpoints are incompatible. Old last-token production checkpoints
-also require rebuilding; missing pooling weights are never silently initialized.
-Current v9 warmup features and head states remain compatible with this pooling
-upgrade. See [migration](migration.md) for older head formats.
+retired-head checkpoints are incompatible. See [migration](migration.md).
 
 ### Merged backbone export
 
@@ -700,8 +600,7 @@ evaluation mode, moves the existing backbone to CPU, and calls
 Safetensors format with `max_shard_size="5GB"`, preserving the backbone's build
 precision and using its own parameter names rather than the source reward
 model's prefixes. The training tokenizer is saved alongside the model config.
-The classification head and cross-attention pooler remain in `adapter[_TAG].pt`;
-neither is merged into the backbone.
+The classification head remains in `adapter[_TAG].pt`.
 
 `export_metadata.json` records `model_name`, `base_revision`,
 `training_source_sha256`, the corresponding `checkpoint_file` and its

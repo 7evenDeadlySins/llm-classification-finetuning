@@ -11,7 +11,6 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
-from torch.utils.checkpoint import checkpoint
 from transformers import AutoConfig, AutoModel, BitsAndBytesConfig
 from transformers.models.qwen3.modeling_qwen3 import Qwen3RMSNorm
 
@@ -21,7 +20,6 @@ from ...model_storage import load_model_weights, load_pretrained
 from ..common import ABSwapAverager, GPUEnvironment
 from .data import BranchBatch, PairwiseBatch
 from .heads import EXPT, EXPT2, SR2, create_classification_head
-from .pooling import LastTokenQueryCrossAttention
 
 
 class LoRAQwenClassifier(nn.Module):
@@ -54,7 +52,6 @@ class LoRAQwenClassifier(nn.Module):
 		self.feature_dtype = (
 			torch.bfloat16 if self.dtype == torch.bfloat16 else torch.float32
 		)
-		self.pooling: LastTokenQueryCrossAttention | None = None
 		if warmup_only:
 			# Config/tokenizer identities remain mandatory even on complete feature hits.
 			base_config = load_pretrained(
@@ -125,15 +122,6 @@ class LoRAQwenClassifier(nn.Module):
 		self._gradient_checkpointing_enabled = self.backbone.is_gradient_checkpointing
 		self._set_gradient_checkpointing(False)
 		self._initialize_head(config)
-		# Keep existing head initialization and warmup RNG/cache identities intact.
-		with torch.random.fork_rng(devices=[]):
-			self.pooling = LastTokenQueryCrossAttention(
-				self.backbone_hidden_size,
-				config.cross_attention_dim,
-				config.cross_attention_heads,
-				config.dropout,
-				compute_dtype=self.dtype,
-			).to(device=self.device, dtype=torch.float32)
 
 	def _initialize_head(self, config: WarmupModelConfig) -> None:
 		"""Allocate real random head parameters, independently of deferred extraction."""
@@ -205,11 +193,7 @@ class LoRAQwenClassifier(nn.Module):
 		self._gradient_checkpointing_enabled = enabled
 
 	def encode(self, batch: PairwiseBatch) -> tuple[Tensor, Tensor]:
-		"""Pool both joint branches using the same parameters and residual dropout."""
-		if self.pooling is None:
-			raise ModelExecutionError(
-				"Joint encoding requires cross-attention pooling."
-			)
+		"""Pool the last real token of each branch, retaining both gradient graphs."""
 		padded_tokens = (
 			batch.branch_a.input_ids.numel() + batch.branch_b.input_ids.numel()
 		)
@@ -222,28 +206,10 @@ class LoRAQwenClassifier(nn.Module):
 			)
 		)
 		# Retain one policy for both branches and the caller's complete backward pass.
-		mask = self.pooling.make_dropout_mask(batch.branch_a.input_ids.shape[0])
-		return (
-			self.encode_branch(
-				batch.branch_a, use_cross_attention=True, residual_dropout_mask=mask
-			),
-			self.encode_branch(
-				batch.branch_b, use_cross_attention=True, residual_dropout_mask=mask
-			),
-		)
+		return self.encode_branch(batch.branch_a), self.encode_branch(batch.branch_b)
 
-	def encode_branch(
-		self,
-		branch: BranchBatch,
-		*,
-		use_cross_attention: bool,
-		residual_dropout_mask: Tensor | None = None,
-	) -> Tensor:
-		"""Explicitly select joint attention or the unchanged frozen/warmup pooling."""
-		if use_cross_attention and self.pooling is None:
-			raise ModelExecutionError(
-				"This model has no cross-attention pooling weights."
-			)
+	def encode_branch(self, branch: BranchBatch) -> Tensor:
+		"""Encode one batch of branches for extraction or differentiable training."""
 		if self.backbone is None:
 			self.load_frozen_backbone()
 		if not self.training or not torch.is_grad_enabled():
@@ -266,28 +232,12 @@ class LoRAQwenClassifier(nn.Module):
 				use_cache=False,
 				return_dict=True,
 			).last_hidden_state
-		last_positions = branch.last_positions.to(hidden.device, non_blocking=True)
-		if use_cross_attention:
-			if (
-				self.training
-				and torch.is_grad_enabled()
-				and self._gradient_checkpointing_enabled
-			):
-				pooled = checkpoint(
-					self.pooling,
-					hidden,
-					last_positions,
-					residual_dropout_mask,
-					use_reentrant=False,
-				)
-			else:
-				pooled = self.pooling(hidden, last_positions, residual_dropout_mask)
-		else:
+			last_positions = branch.last_positions.to(hidden.device, non_blocking=True)
 			rows = torch.arange(hidden.shape[0], device=hidden.device)
 			pooled = hidden[rows, last_positions].to(
 				device=self.device, dtype=self.feature_dtype
 			)
-		del hidden
+			del hidden
 		return pooled
 
 	def forward(self, batch: PairwiseBatch) -> Tensor:

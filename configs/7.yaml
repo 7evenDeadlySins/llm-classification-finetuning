@@ -1,16 +1,16 @@
-# Read the prebuilt LMSYS33K dataset with model commands.
-# Do not run init/preprocess with this consumption config: construction first
-# splits the 57,477 Kaggle rows at 0.2, freezes validation IDs, then appends LMSYS
-# to train. The fraction below is the resulting full-table validation share.
-# Build parameters and checksums: data/processed/lmsys33k/summary.json
+# Consume merged real preferences and scope-specific synthetic ties with the frozen Kaggle holdout.
+# Rebuild with data/merge_external_data.py; init/preprocess produce Kaggle-only splits.
+# Counts, source revisions and checksums: data/processed/external_merged/summary.json
+
 data:
   competition: llm-classification-finetuning
   raw_dir: data/raw
-  processed_path: data/processed/lmsys33k/train_validation.parquet
-  build_supplement_path: data/synthetic_tie/lmsys33k/synthetic_ties.parquet
+  processed_path: data/processed/external_merged/train_validation.parquet
+  train_supplement_path: data/synthetic_tie/external_merged/train/synthetic_ties.parquet
+  build_supplement_path: data/synthetic_tie/external_merged/build/synthetic_ties.parquet
 
 validation:
-  validation_fraction: 0.14827092496807565
+  validation_fraction: 0.046680013482178755
   random_state: 42
   tokenizer_name: Skywork/Skywork-Reward-V2-Qwen3-4B
   tokenizer_revision: fd958fef475f323f4e6b195930e3dd918485c668
@@ -28,7 +28,7 @@ SR2_Qwen3_4B:
   early_stopping: 7
   label_smoothing: 0.0
   model_name: Skywork/Skywork-Reward-V2-Qwen3-4B
-  max_length: 13866
+  max_length: 105221
   hidden_size: 128
   dropout: 0.1
   build_epochs: 37
@@ -45,7 +45,7 @@ SR2_Qwen3_4B:
 warmup:
   label_smoothing: 0.0
   model_name: Skywork/Skywork-Reward-V2-Qwen3-4B
-  max_length: 13866
+  max_length: 105221
   hidden_size: 128
   dropout: 0.1
   build_epochs: 9
@@ -60,12 +60,9 @@ warmup:
   dataloader_workers: 0
 
 SR2_Qwen3_4B_lora:
-  cross_attention_dim: 256
-  cross_attention_heads: 4
-  cross_attention_lr_multiplier: 10.0
   label_smoothing: 0.0
   model_name: Skywork/Skywork-Reward-V2-Qwen3-4B
-  max_length: 13866
+  max_length: 105221
   gradient_checkpointing_threshold: 12544
   gradient_checkpointing_budget: 147456
   training_batch_size: 1

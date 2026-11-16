@@ -11,7 +11,7 @@ focused classes. Prefer package public exports to private cross-package helpers.
 | [README.md](README.md) | Overview, active profiles, and navigation |
 | [docs/getting-started.md](docs/getting-started.md), [docs/colab.md](docs/colab.md), [docs/kaggle-submission.md](docs/kaggle-submission.md) | Local/remote setup, operational workflows, and the Kaggle submission notebook |
 | [docs/commands.md](docs/commands.md), [docs/configuration.md](docs/configuration.md) | CLI behavior, field definitions, defaults, path rules, and batch experiments |
-| [docs/data-preparation.md](docs/data-preparation.md), [docs/models.md](docs/models.md), [docs/lora.md](docs/lora.md) | Data/model behavior and training algorithms |
+| [docs/data-preparation.md](docs/data-preparation.md), [docs/external-training-data.md](docs/external-training-data.md), [docs/recommended-external-data.md](docs/recommended-external-data.md), [docs/models.md](docs/models.md), [docs/lora.md](docs/lora.md) | Data/model behavior, candidate external datasets, and training algorithms |
 | [docs/caching.md](docs/caching.md), [docs/reports.md](docs/reports.md) | Cache identities/APIs, artifacts, reporting, and measurements |
 | [docs/troubleshooting.md](docs/troubleshooting.md), [docs/migration.md](docs/migration.md) | Failure diagnosis and historical formats |
 | This file | Runtime flow, module responsibilities, artifact map, and implementation invariants |
@@ -26,15 +26,19 @@ snapshots when updating current documentation or presets.
 ```mermaid
 flowchart TD
     Raw["Raw training CSV"] --> Prep["Grouped original-only split"]
-    Prep --> Data["Saved processed data"]
+    Prep --> Saved["Saved Kaggle split"]
+    Saved --> Merge["Frozen-holdout hard-vote merge"]
+    External["Pinned real preference releases"] --> Merge
+    Merge --> Data["Saved merged data"]
     Data --> Validate["Holdout validation"]
     Data --> Warmup["Train-only head-warmup cache"]
     Data --> Build["Full-data build"]
-    Data --> Synthetic["Audited build-only synthetic ties"]
-    Synthetic --> Build
+    TrainTies["Train synthetic ties"] --> Validate
+    TrainTies --> Warmup
+    BuildTies["Build synthetic ties"] --> Build
     Validate --> Run["Predictions, metrics, config"]
     Run --> Report["PNG and XLSX report"]
-    Build --> Checkpoint["SR2 adapter/pooling/head checkpoint"]
+    Build --> Checkpoint["SR2 adapter/head checkpoint"]
     Build --> Merged["Merged backbone and tokenizer"]
     Build --> Head["Frozen SR2 head checkpoint"]
 ```
@@ -42,8 +46,11 @@ flowchart TD
 The saved split included in Git can enter this flow without downloading raw data.
 Standalone warmup is optional; inline LoRA runs create/reuse their compatible
 warmup state. Validation does not save production checkpoints. Builds use IDs
-from both partitions and append the configured independent synthetic tie supplement.
-Validation and standalone warmup never load that supplement. Frozen SR2 saves only its independent head; LoRA builds
+from both partitions. Current presets consume merged real data with hard labels
+and append scope-specific synthetic ties: validation and standalone warmup use
+the train supplement, while builds use only the build supplement. The frozen
+validation rows remain real-only.
+Frozen SR2 saves only its independent head; LoRA builds
 also export the merged backbone with its tokenizer.
 
 Paths and `.env` resolve from the process working directory. The batch scripts
@@ -74,13 +81,19 @@ Both own independent explicit model/config selection, sequential subprocesses,
 terminal/log streaming, and failure summaries. Usage belongs in
 [batch validation](docs/commands.md#batch-validation) and
 [batch builds](docs/commands.md#batch-builds).
+
+[data/merge_external_data.py](data/merge_external_data.py) invokes the
+dedicated real-data merger without rebuilding the Kaggle holdout. It accepts
+`--config`, `--baseline-path`, and `--output-dir`; defaults and artifact meanings
+belong in [data preparation](docs/data-preparation.md#merged-external-preferences).
 Both scripts load each selected config from the project-root cwd
 and ensure its processed data before launching the model child, optionally
 filling missing components from a project mirror via `--data-source-root`.
 Successful data preparations are shared by resolved path within the batch;
 preparation failures use the existing task log and failure summary. Model builds
 also restore their configured supplement; preparation reuse identifies both paths.
-Standalone warmup and validation prepare only the saved original table.
+Standalone warmup and validation restore the train supplement; preparation
+reuse in both batch scripts includes the selected supplement path.
 
 The ignored local `!validate.ipynb` and `!build.ipynb` provide Colab setup and
 their corresponding batch workflows. The build notebook additionally copies
@@ -93,11 +106,9 @@ to the batch script; complete local processed data bypasses that source.
 [submit.ipynb](submit.ipynb) is the tracked, self-contained Kaggle inference notebook (GPU
 T4 x2, Python 3.13+, offline inference after upload-time dependency setup). It sits
 outside the package and the `model` CLI: it reads the build's
-`adapter.pt` pooling/head and `merged/` backbone and writes `submission.csv`. It duplicates the
-SR2 v9 head, last-token-query cross-attention, and conversation serializer, so changes to
-`models/SR2_Qwen3_4B_lora/heads.py`, `models/SR2_Qwen3_4B_lora/pooling.py`, or
-`models/common/data.py` must be mirrored there. Full-sequence final RMSNorm
-precedes attention pooling on the final-stage GPU.
+`adapter.pt` head and `merged/` backbone and writes `submission.csv`. It duplicates the
+SR2 v9 head and the conversation serializer, so changes to
+`models/SR2_Qwen3_4B_lora/heads.py` or `models/common/data.py` must be mirrored there.
 Behavior belongs in [Kaggle submission](docs/kaggle-submission.md).
 
 ## Package map
@@ -118,8 +129,12 @@ Package `__init__.py` files expose intended public interfaces unless noted.
 | `timing.py` | Unbounded `HH:MM:SS` duration formatting with optional millisecond precision for fast validation logs |
 | `pipeline.py` | `PrepareDataPipeline`: download/preprocessing orchestration and optional download-progress callback; `EnsureProcessedDataPipeline`: local processed-data checks and optional project-mirror restoration without preprocessing |
 | `data/downloader.py` | Missing Kaggle training CSV download and single-file ZIP normalization |
+| `data/external.py` | Pinned official dataset identities, download/reuse and LFS checksum verification, raw source lock manifest |
+| `external_pipeline.py` | `MergeExternalDataPipeline`: frozen Kaggle baseline, conversion/voting orchestration, complete branch length statistics without length filtering/truncation, staged audits, publication and readback checks |
+| `preprocess/external.py` | Strict text-only source adapters, restricted NumPy container-representation decoder, Arena history alignment, HelpSteer sign labels and source vote identities |
+| `preprocess/deduplication.py` | `ExternalBattleDeduplicator`: complete-prompt/unordered-pair identities, validation exclusion, optional independent hard-vote merging, conflicting-vote diagnostics and representative/status/count audits |
 | `preprocess/splits.py` | Exact-response tie correction before labels/prompt hashes, grouped class quotas, balance orchestration, original-only integrity summaries, and processed publication |
-| `preprocess/synthetic_tie.py` | Deterministic build-only self-response tie generation, exact rational win-rate adjustment, full source/selection/replacement audits, and staged publication; invoked by `scripts/generate_synthetic_tie.py` |
+| `preprocess/synthetic_tie.py` | Deterministic train/build self-response tie generation with dynamic counts, exact rational win-rate adjustment, full source/selection/replacement audits with bounded-volume streaming, and staged publication; invoked by `data/generate_synthetic_tie.py` |
 | `preprocess/token_balance.py` | Canonical token counting and deterministic equal-class whole-group exchanges |
 
 ### Profile registration and warmup
@@ -157,14 +172,14 @@ with the current SR2 head and warmup feature identities, rather than legacy MLP 
 | Module | Owns |
 | --- | --- |
 | `contracts.py` | Execution modes, pipeline interface, and validation/build/warmup result summaries, including optional executed warmup/joint epoch counts and merged-backbone path for builds |
-| `supplement.py` | Independent build supplement loading, source fingerprint/count/provenance checks, uniqueness and exact-score validation, and composite build fingerprints |
+| `supplement.py` | Scope-specific supplement loading, calculated counts, source fingerprint/provenance and validation-isolation checks, independent historical-score validation, and composite training fingerprints |
 | `inputs.py` | Processed table loading, strict original-only split/ID validation, multipart reads, and reconstructed source fingerprints |
 | `data.py` | Tokenizer-injected official chat-template serialization and pairwise training repository |
 | `hardware.py` | CUDA/precision validation, single-GPU placement, isolated phase intervals with cross-epoch allocator maxima, and reset-safe global peaks |
 | `backbone.py` | Local weight/configuration content fingerprints for caches |
 | `compatibility.py` | Frozen embedding and head-checkpoint compatibility construction |
 | `cache_storage.py` | Locked file sessions, atomic/multipart publication with destination-directory permission inheritance on Windows, checksums, corruption archives, non-destructive component/size checks, and staged missing-component copies preserving authoritative manifests |
-| `token_cache.py` | Content-addressed text encodings, compact CPU views, canonical pair tokens, and context validation |
+| `token_cache.py` | Content-addressed text encodings, compact CPU views, canonical pair tokens, context validation, and exact length-only caching for large external-data preparation |
 | `cache.py` | Per-branch SQLite frozen/warmup embeddings, lossless FP16/BF16/FP32 storage, and rebinding to current rows |
 | `extraction_batching.py` | Deterministic branch extraction plans comparing contiguous DP with best-fit by batch count, then padded tokens; stable length/iteration behavior |
 | `extractor.py` | CPU identity preparation and lazy GPU encoding of missing frozen branches |
@@ -188,13 +203,12 @@ default to SR2. Retained legacy quantization/head branches are not active profil
 | `data.py` | Canonical token/feature views, branch flattening, independent right padding, and CPU pooling positions |
 | `batching.py` | CPU loader preparation, shared tokens, global base plans, merged optimizer groups, epoch repacking, warmup training-ID/label identity context, and explicit frozen-head config/full-data preparation |
 | `heads.py` | Head factory, precision wrapper, fused subtractive L/M win projections, FP32 tie readout of clamped win sums and absolute differences, and retained legacy head definitions |
-| `pooling.py` | Shared last-token-query multi-head cross-attention, independent FP32 Pre-LNs, masked FP32 scores/softmax, zero-initialized output projection, and paired residual dropout with FP32 fusion |
-| `model.py` | Differentiable shared backbone/adapters, explicit last-token warmup versus cross-attention joint encoding, RNG-preserving pooler initialization, config-only head initialization with lazy frozen-backbone loading on feature misses, direct device loading, head calls, and per-joint-batch backbone/pooler checkpointing |
-| `extractor.py` | Explicit pooling selection for unchanged frozen/warmup CPU features or FP32 joint-validation features, optionally filling only missing warmup branches into a shared tensor, with branch-batch progress callbacks |
+| `model.py` | Differentiable shared backbone/adapters, config-only head initialization with lazy frozen-backbone loading on feature misses and CPU/CUDA RNG preservation, direct device loading, pooling/dtypes, head calls, and per-joint-batch checkpointing |
+| `extractor.py` | No-gradient CPU features for warmup or joint validation, optionally filling only missing branches into a shared tensor, with branch-batch progress callbacks |
 | `trainer.py` | CPU token preparation, plateau-scheduled frozen-head validation, epoch-based exponential build/warmup and independent update-based cosine joint learning-rate curves, frozen-head validation early stopping with best-epoch predictions and per-epoch progress, both branch graphs and one backward pass, optimizer/scaler state, fixed-rate lower-epoch warmup continuation and shuffle replay, epoch-end warmup train/validation inference on shared features, independent extraction/warmup/joint progress and executed epoch counts, standalone cached-head evaluation, and optional training/validation memory intervals |
 | `warmup_cache.py` | Completed head/AdamW/scaler/RNG identity, exact exponential-training or descending fixed-rate compatible-epoch lookup, distinct source/target paths, validation, atomic storage, and restoration |
 | `warmup_feature_cache.py` | Adapter-free feature identity, complete-token branch lookup, missing-input deduplication/rebinding, and shared embedding-cache publication across frozen SR2 and standalone/inline warmup |
-| `checkpoint.py` | Destination write preflight, schema-v3 adapter/pooling/head persistence and CPU readback validation, pooler architecture/dimension/head-count compatibility and FP32 tensor validation, and merged-backbone/tokenizer export with metadata, local validation, and recoverable directory replacement |
+| `checkpoint.py` | Destination write preflight, portable adapter/head persistence and CPU readback validation, revision/architecture compatibility, and merged-backbone/tokenizer export with metadata, local validation, and recoverable directory replacement |
 | `pipeline.py` | LoRA holdout orchestration and independent full-data build flow with CPU preparation and both write preflights before GPU setup, adapter/head saving before merged export, cleanup preserving execution errors |
 
 ### Reporting
@@ -216,14 +230,19 @@ defaults to `./results` and controls validation, report, and log roots.
 | `config_archive/` | Historical configurations; not current defaults |
 | `.env.example` | Kaggle token, model/training-cache/result paths, and offline HF execution template |
 | `pyproject.toml`, `uv.lock`, `.python-version` | Package/entry points, training dependencies, and Python version |
+| `data/merge_external_data.py`, `data/generate_synthetic_tie.py` | Standalone entry points for real-data merging and optional synthetic tie generation |
 | `<MODEL_PATH>/models--*/` | Native HF downloads; outside training-cache multipart storage |
 | `data/raw/` | Downloaded `train.csv` |
+| `data/raw/external/` | Pinned official real preference sources and checksummed download lock |
 | `data/processed/train_validation.parquet` | Logical saved split; single file or manifest plus volumes |
-| `data/synthetic_tie/lmsys33k/` | Independent build supplement, all candidates/sources, selection/replacement logs, prompt counts, summary and checksums |
+| `data/processed/lmsys33k/` | Historical Kaggle + LMSYS snapshot, also the frozen Kaggle baseline for the merger |
+| `data/processed/external_merged/` | Current merged real-only hard-label data, frozen validation IDs, conversion/vote/token audits and checksums |
+| `data/synthetic_tie/external_merged/train/`, `build/` | Mutually exclusive train/build synthetic ties and generation audits |
+| `data/synthetic_tie/lmsys33k/` | Historical build supplement and audits; disabled in current presets |
 | `<CACHE_PATH>/token_cache/`, `embedding_cache/`, `adapter_batches/plans/` | Shared token, frozen/warmup-feature, and LoRA base-plan stores |
 | `<CACHE_PATH>/SR2_Qwen3_4B_lora_warmup/` | Completed Skywork head state, shared by frozen SR2, LoRA SR2, and standalone warmup |
 | `models/SR2_Qwen3_4B/head[_TAG].pt` | Independent frozen SR2 head and encoding/training metadata |
-| `models/SR2_Qwen3_4B_lora/adapter[_TAG].pt` | SR2 schema-v3 production adapter/pooling/head |
+| `models/SR2_Qwen3_4B_lora/adapter[_TAG].pt` | SR2 production adapter/head |
 | `models/SR2_Qwen3_4B_lora/merged[_TAG]/` | Full LoRA-merged backbone, tokenizer, and export metadata |
 | `<RESULT_PATH>/MODEL-<timestamp>/` | Completed validation CSV, metrics, and YAML snapshot |
 | `<RESULT_PATH>/comprehensive/` | Latest synthesized report pair |
@@ -246,7 +265,11 @@ present in a fresh checkout.
 
 1. **Split integrity:** all models share one saved grouped holdout. Group exchanges
    preserve original class/row counts, each ID has one original row, and
-   infeasible preparation leaves the previous dataset intact. See
+   infeasible preparation leaves the previous dataset intact. External battle
+   deduplication retains distinct response pairs for the same training prompt,
+   including prompts shared with Kaggle training rows, while excluding external
+   rows sharing any frozen validation prompt. Complete prompt and unordered
+   response pair identify a duplicate battle; `group_id` alone does not. See
    [data preparation](docs/data-preparation.md).
 2. **Input and output order:** validate unique original IDs with `is_swapped=False`
    before execution. Render alternating user/assistant turns with the tokenizer's official chat template, no system message, and no
@@ -311,14 +334,8 @@ present in a fresh checkout.
    epochs before publishing a separate target cache. Progress and metrics count only
    newly executed work; schema v5 and existing fixed-rate cache keys remain unchanged.
 6. **LoRA inputs and attention:** never truncate adapter inputs. Right-pad without
-   backbone masks. Frozen and warmup paths explicitly retain last-real-token
-   pooling and existing feature/cache identities. Joint training, joint validation,
-   and production inference apply shared last-token-query cross-attention to the
-   complete final-normalized backbone output. Mask keys after the last real token,
-   include that token, and use no extra causal mask. Both branches share pooler
-   parameters and one residual dropout mask per pair. Preserve scoped backbone
-   SDPA settings; the joint checkpointing decision also covers pooler forwards,
-   reusing the supplied dropout mask. Restore global predicates/flags after failures.
+   masks, pool the last real token, and preserve scoped SDPA/checkpoint
+   recomputation settings. Restore global predicates/flags after failures.
    See [hardware/input behavior](docs/lora.md#hardware-and-input-limits).
 7. **Optimizer groups:** preserve row-normalized loss, one clipping/update boundary
    per finalized group, short-tail merging, and the merged joint update last.
@@ -346,10 +363,7 @@ present in a fresh checkout.
    `0` or at least `1`, defaulting to `1.0`. Frozen SR2, warmup, and joint LoRA
    resolve independent multipliers; the joint transition resets rates and switches
    the `raw_t` multiplier. All schedulers derive rates from explicit group
-   multipliers. Joint cross-attention projection and LayerNorm groups use
-   `cross_attention_lr_multiplier` relative to the base rate, including the delay
-   and cosine endpoint; only the LayerNorm group has zero weight decay.
-   Head warmup and
+   multipliers. Head warmup and
    frozen SR2 builds derive exponential decay from `build_epochs` and `build_min_lr`,
    setting one rate at the start of each epoch. The first epoch uses the initial
    rate; for multiple epochs, the final epoch uses the minimum exactly. A single
@@ -370,12 +384,9 @@ present in a fresh checkout.
    counter without restoring `patience` on later improvements or resetting other
    scheduler/optimizer/model state. See
    [batching](docs/lora.md#optional-token-budget-training-batches).
-8. **Precision:** trainable adapter/pooling/head parameters, gradients, and AdamW moments
-   stay FP32. Warmup feature dtypes and head computation retain the documented
-   policy. Pooler projections and probability/value products use the configured
-   compute dtype; Pre-LNs, QK matmul, masking/softmax, and residual fusion are FP32.
-   Joint pooled features remain FP32 through temporary CPU validation storage.
-   BF16 LoRA input dtype upcasting is disabled once after adapter
+8. **Precision:** trainable adapter/head parameters, gradients, and AdamW moments
+   stay FP32. BF16 features/head autocast and FP32 logits retain the documented
+   policy. BF16 LoRA input dtype upcasting is disabled once after adapter
    initialization for the model instance; forward and checkpoint recomputation
    do not traverse the model to change that policy. Evaluation disables gradient
    checkpointing. See [precision](docs/lora.md#hardware-and-input-limits).
@@ -383,18 +394,16 @@ present in a fresh checkout.
    states and validate them before restoration. Cache identity includes actual
    training IDs and their labels, sorted by ID; holdout/standalone warmup exclude
    validation-only labels, while full-data builds include both partitions and the
-   independent supplement (`split="build"`). Build fingerprints combine both
-   reconstructed Parquet digests; batch plans and head-warmup identities include
-   supplement content. Holdout/standalone cache identities remain compatible. Each
+   build supplement (`split="build"`). Holdout/standalone training adds its
+   separate train supplement. Training fingerprints combine real and selected
+   supplement digests; batch plans and head-warmup identities include supplement
+   content in both scopes. Unsupplemented cache identities remain compatible. Each
    executed warmup epoch evaluates its complete training set with
    final weights, dropout disabled, and warmup smoothing; validation remains
    unsmoothed. Publish head state only after these evaluations succeed.
    Warmup cache metadata includes `t_lr_multiplier` only for non-default warmup
    multipliers, including zero, preserving existing default keys and schema v5.
    Joint multipliers do not affect warmup identity.
-   Cross-attention is bypassed for every warmup extraction and initialized after
-   the original head without advancing its CPU RNG. Its fields and weights never
-   enter warmup features, cache identities, or cached head optimizer state.
    Warmup caches retain optimizer state for warmup continuation. On entry to the
    first joint epoch, clear AdamW moments and step counters once, including after
    complete cache hits and partial-cache continuation. Preserve trained weights,
@@ -410,11 +419,9 @@ present in a fresh checkout.
    Restore continuation RNG after all feature preparation.
    No persisted live LoRA features or losses. See [warmup](docs/caching.md#lora-head-warmup).
 10. **Placement and production state:** load backbones directly on the configured
-    GPU with device maps, without replicas or CPU/disk offload. Production builds save adapter/pooling/head first, then export the LoRA-merged backbone and
-    tokenizer on CPU at the build precision. Schema-v3 checkpoints retain the Hub
-    revision and require complete FP32 pooling tensors plus a versioned pooling
-    marker, dimension, and head count; old last-token production files require
-    rebuilding. Frozen-head and warmup schemas stay unchanged. Optimizer state is omitted. Merged exports use staged
+    GPU with device maps, without replicas or CPU/disk offload. Production builds save adapter/head first, then export the LoRA-merged backbone and
+    tokenizer on CPU at the build precision. Adapter/head files retain their
+    schema and Hub revision; optimizer state is omitted. Merged exports use staged
     directory publication with backup/restore handling.
     See [GPU layout](docs/configuration.md#gpu-configuration) and [checkpoints](docs/lora.md#checkpoints).
 11. **Publication:** stage generated artifacts before exposure. `CacheStorage`

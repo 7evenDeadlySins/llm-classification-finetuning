@@ -32,18 +32,15 @@ SR2_Qwen3_4B_lora/
     └── model-00001-of-00002.safetensors, model-00002-of-00002.safetensors
 ```
 
-`adapter.pt` supplies the FP32 `head_state_dict` and `pooling_state_dict`; the LoRA
-weights are already merged into `merged/`. Files downloaded from Drive as split
-archives (`*-001.zip`, shards named
+Only `adapter.pt`'s `head_state_dict` is used; the LoRA weights are already merged into
+`merged/`. Files downloaded from Drive as split archives (`*-001.zip`, shards named
 `model-0000X-of-00002-00Y.safetensors`) must be unzipped first. The notebook tolerates the
 `-00Y` shard suffix by symlinking to the names in the index, but it does not unzip parts.
 
 Set `MODEL_DIR` in the configuration block **below the startup diagnostics in the first
 code cell**. If that path does not exist, `/kaggle/input` is searched for an `adapter.pt`
 beside a `merged/config.json`. The notebook requires the
-`swap_equivariant_abs_diff_v9` head marker and the
-`last_token_query_cross_attention_v1` pooling marker, valid attention dimension
-and head count, matching hidden sizes and base
+`swap_equivariant_abs_diff_v9` head marker, matching hidden sizes and base
 revisions, and an `export_metadata.json` checksum that matches `adapter.pt`.
 The v9 head uses subtractive cross-projected wins and their nonnegative clamped
 GELU activations `C_A` and `C_B`, followed by
@@ -56,18 +53,8 @@ dropout mask, which the tie features inherit; evaluation disables dropout.
 Earlier checkpoints require rebuilding before use with this notebook. The v9
 marker and strict tensor-name/shape checks reject old heads, including v8's
 `raw_b_tie` and v7's `raw_w_tie`, even if their metadata is relabeled.
-Checkpoint schema v3 requires complete finite FP32 pooling weights with exact
-tensor names and shapes. Earlier last-token production checkpoints also need
-rebuilding; current v9 warmup caches remain reusable. The merged-backbone pairing
-check still covers the complete `adapter.pt` checksum.
-
-The pooler uses the last real token as a query over every real token, including
-itself, with separate Pre-LNs and four bias-free projections. Projections and
-the probability/value product follow the configured backbone compute precision
-(FP16 on T4); Pre-LNs, QK scores, masking/softmax, and residual fusion run in FP32.
-The complete backbone output receives its final RMSNorm before pooling.
-The pooler stays on the final-stage GPU and only `[B, D]` FP32 features move to
-host memory. Inference disables the residual dropout that A/B share in training.
+Checkpoint schema v2 and the
+merged-backbone pairing checks remain unchanged.
 
 ## Run
 
@@ -151,7 +138,7 @@ When project dependencies change, refresh `RuntimeDiagnostics.LOCKED_VERSIONS` f
 | Backbone | Merged Qwen3 safetensors shards streamed directly to `cuda:0` (embeddings + first half of layers) and `cuda:1` (second half + norm) in FP16 without materializing the 8 GB model in host RAM or installing accelerate hooks |
 | Pipelining | Up to `pipeline_depth` batches are enqueued before the oldest is synchronised, so GPU0 works on batch k+1 while GPU1 finishes batch k. Inputs and pooled outputs use pinned memory |
 | Attention | `use_gqa_in_sdpa` is patched (default `use_gqa="off"`: K/V heads are repeated), only Flash / memory-efficient / cuDNN kernels are allowed and math fallback is disabled. `"auto"` probes native `enable_gqa` and adopts it only if it works and is faster |
-| Pooling and head | Full-sequence final `Qwen3RMSNorm`, trained last-token-query cross-attention on the final-stage GPU, FP32 pooled features, SR2 v9 head in FP32, temperature scaling followed by softmax in the competition column order |
+| Pooling and head | Last real token pooled **before** `Qwen3RMSNorm` (avoiding a full-sequence FP32 norm buffer), FP32 features, SR2 v9 head in FP32, temperature scaling followed by softmax in the competition column order |
 | Output | `submission.csv` validated against `sample_submission.csv` (columns, ids, order, finite, rows sum to 1) |
 
 All patches are restored when the run ends.
@@ -187,9 +174,6 @@ startup diagnostics in the first code cell.
   main numerical risk of T4 inference.
 - **Very long inputs:** nothing is truncated; Qwen3's trained position limit is 40,960
   tokens, and the longest training branch is 13,866.
-- **Memory:** full-sequence final RMSNorm and cross-attention Pre-LN add temporary
-  buffers. Reassess `token_budget` for the GPU; the previous last-token pooling
-  budget is not a memory guarantee for this architecture.
-- **Duplicated code.** The notebook copies the SR2 v9 head, cross-attention pooler,
-  and conversation serializer. Mirror changes in any of these package modules.
+- **Duplicated code.** The notebook copies the SR2 v9 head and the conversation serializer.
+  When either changes in the package, change the notebook too.
 

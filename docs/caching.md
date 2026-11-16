@@ -13,8 +13,8 @@ Production checkpoints under `models/` are separate artifacts.
 | --- | --- | --- |
 | `token_cache/` | Text, tokenizer content/implementation, encoding options, library/schema versions | IDs, labels, split, source path, model weights, training settings |
 | `embedding_cache/` (frozen SR2, SR2 warmup, and historical frozen model) | Effective branch token IDs, exact backbone identity, hidden size, precision, pooling/storage/extraction version | IDs, labels, split, head/training settings, attention implementation, TF32, extraction budget |
-| `adapter_batches/plans/` | Selected sample identities/orientations and A/B lengths, checkpointing threshold, update-group size, algorithm version, build supplement content when enabled | Labels, source order, token content beyond lengths, second-pass budget |
-| `SR2_Qwen3_4B_lora_warmup/` | Actual training IDs and labels, build supplement content when enabled, effective SR2 warmup identity | Original training text, validation-only IDs/labels, precision, joint-training settings |
+| `adapter_batches/plans/` | Selected sample identities/orientations and A/B lengths, checkpointing threshold, update-group size, algorithm version, selected supplement content when enabled | Labels, source order, token content beyond lengths, second-pass budget |
+| `SR2_Qwen3_4B_lora_warmup/` | Actual training IDs and labels, selected supplement content when enabled, effective SR2 warmup identity | Original training text, validation-only IDs/labels, precision, joint-training settings |
 
 Retired profiles' caches, including `qwen3_4b_lora_EXPT2_warmup/`, remain
 historical artifacts. SR2 and standalone warmup do not read that namespace.
@@ -124,6 +124,13 @@ happens after lookup.
 Reads validate count, byte length, and checksum; newly encoded IDs are checked
 before storage. Invalid entries are recomputed, writes are transactional, and
 corrupt SQLite shards are archived and rebuilt.
+
+The external-data merger uses `TokenizationCache.count_tokens()` for complete
+branch length statistics. It shares the tokenizer/encoding namespace, reuses
+lengths from existing full encodings, and stores new exact counts in
+`token_cache/<namespace>.lengths.sqlite3`. New counts use the same tokenizer
+options as full encoding with padding and truncation disabled, without storing
+new token arrays. Model training continues to use the full-encoding cache.
 
 ## Frozen embeddings
 
@@ -368,18 +375,18 @@ IDs or labels preserves holdout warmup-state reuse because fixed-epoch warmup
 validation neither updates the head nor selects an early-stopping checkpoint. Frozen SR2 validation
 selects its best epoch but does not use this state cache.
 
-For supplemental builds, `WarmupCacheContext.training_supplement_sha256`
+For supplemented training in either scope, `WarmupCacheContext.training_supplement_sha256`
 contains the reconstructed supplement Parquet SHA-256. It enters head-warmup
 and batch-plan metadata even if synthetic IDs and labels remain unchanged.
 The field is omitted from head-cache metadata when no supplement is used,
-preserving existing holdout/standalone cache keys. Build source fingerprints
+preserving existing unsupplemented cache keys. Training source fingerprints
 hash a versioned combination of original and supplement SHA-256 values;
 checkpoint and merged-export metadata receive that combined fingerprint.
 Tokens and frozen features continue to reuse matching branch content.
 
-Normal holdout and standalone warmup use train-partition IDs and labels;
-full-data builds use all original IDs and labels, including the validation
-partition, plus configured build-only supplemental rows. These normally select different cache keys. Checkpoint tags
+Normal holdout and standalone warmup use real train-partition IDs and labels
+plus the configured train supplement; full-data builds use all original IDs and
+labels, including the validation partition, plus only the build supplement. These normally select different cache keys. Checkpoint tags
 do not enter the identity. Context limits are excluded because inputs are never
 truncated and are independently validated.
 
@@ -528,7 +535,8 @@ For a build, prepare with
 `LoRATrainingBatchRepository.from_config(config, include_build_supplement=True)`
 before calling `get_training(full_data=True)`. This selects both original
 partitions and the configured supplement. The preparation flag defaults to
-`False`; validation and standalone warmup exclude build rows. The default
+`False`; validation and standalone warmup select `data.train_supplement_path`
+instead. Full-data mode selects only `data.build_supplement_path`. The default
 profile for this Python API is SR2. The loader yields `PairwiseBatch`; shared
 tokens are available through `training.tokens`.
 

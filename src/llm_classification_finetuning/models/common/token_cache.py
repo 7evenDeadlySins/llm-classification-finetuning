@@ -252,6 +252,106 @@ class TokenizationCache:
 			}
 		)
 
+	def count_tokens(
+		self, texts: Sequence[str], *, add_special_tokens: bool = False
+	) -> np.ndarray:
+		"""Cache exact complete lengths without persisting newly encoded token arrays.
+
+		Existing full encodings supply their checked lengths. New texts use the same
+		tokenizer/options as encode(), with no padding or truncation, but only counts
+		are published. This keeps large data-preparation runs bounded on disk.
+		"""
+		if isinstance(texts, (str, bytes)) or any(
+			not isinstance(text, str) for text in texts
+		):
+			raise TypeError("Token length inputs must be a sequence of strings.")
+		if not isinstance(add_special_tokens, bool):
+			raise TypeError("add_special_tokens must be boolean.")
+		self.tokenizer_key = self._fingerprint(self.tokenizer)
+		options = {
+			"add_special_tokens": add_special_tokens,
+			"split_special_tokens": bool(
+				getattr(self.tokenizer, "split_special_tokens", False)
+			),
+			"truncation": False,
+		}
+		namespace = self._namespace(options)
+		keys = [hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts]
+		unique = dict(zip(keys, texts, strict=True))
+		storage = CacheStorage(self.root / f"{namespace}.lengths.sqlite3")
+		counts = {}
+		shared_hits = encoded_count = 0
+		try:
+			with storage.open("rw") as session:
+				connection = sqlite3.connect(session.path, timeout=30)
+				try:
+					with connection:
+						connection.execute(
+							"CREATE TABLE IF NOT EXISTS lengths (text_sha256 TEXT PRIMARY KEY, token_count INTEGER NOT NULL) WITHOUT ROWID"
+						)
+					for start in range(0, len(unique), self.CHUNK_SIZE):
+						chunk = list(unique)[start : start + self.CHUNK_SIZE]
+						for key, count in connection.execute(
+							f"SELECT text_sha256, token_count FROM lengths WHERE text_sha256 IN ({','.join('?' for _ in chunk)})",
+							chunk,
+						):
+							if isinstance(count, int) and count >= 0:
+								counts[key] = count
+					cached_hits = len(counts)
+					missing = [key for key in unique if key not in counts]
+					full_storage = CacheStorage(self.root / f"{namespace}.sqlite3")
+					if missing and full_storage.exists():
+						with full_storage.open("r") as full_session:
+							full = sqlite3.connect(full_session.path, timeout=30)
+							try:
+								for start in range(0, len(missing), self.CHUNK_SIZE):
+									chunk = missing[start : start + self.CHUNK_SIZE]
+									for key, count, size in full.execute(
+										f"SELECT text_sha256, token_count, length(ids) FROM encodings WHERE text_sha256 IN ({','.join('?' for _ in chunk)})",
+										chunk,
+									):
+										if (
+											isinstance(count, int)
+											and count >= 0
+											and size == 4 * count
+										):
+											counts[key] = count
+											shared_hits += 1
+							finally:
+								full.close()
+					missing = [key for key in unique if key not in counts]
+					for start in range(0, len(missing), self.CHUNK_SIZE):
+						chunk = missing[start : start + self.CHUNK_SIZE]
+						encoded = self.tokenizer(
+							[unique[key] for key in chunk],
+							padding=False,
+							return_attention_mask=False,
+							return_token_type_ids=False,
+							verbose=False,
+							**options,
+						)["input_ids"]
+						for key, ids in zip(chunk, encoded, strict=True):
+							counts[key] = len(ids)
+						encoded_count += len(chunk)
+					if shared_hits or encoded_count:
+						with connection:
+							connection.executemany(
+								"INSERT OR REPLACE INTO lengths VALUES (?, ?)",
+								counts.items(),
+							)
+						session.mark_dirty()
+				finally:
+					connection.close()
+		except (sqlite3.Error, OSError) as error:
+			raise ModelExecutionError(
+				f"Could not count complete tokens in {storage.path}: {error}"
+			) from error
+		print(
+			f"Length cache: {cached_hits:,} reused counts, {shared_hits:,} shared encodings, {encoded_count:,} newly counted; {self.root}",
+			flush=True,
+		)
+		return np.asarray([counts[key] for key in keys], dtype=np.int64)
+
 	def _encodings(
 		self, texts: dict[str, str], options: dict[str, Any], refresh: bool
 	) -> tuple[dict[str, bytes], int, int]:

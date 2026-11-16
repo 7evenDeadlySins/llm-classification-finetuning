@@ -616,6 +616,7 @@ class LoRATrainingBatchRepository:
 				serializer=ConversationSerializer(token_cache.tokenizer),
 				validation_fraction=config.validation.validation_fraction,
 				build_supplement_path=config.data.build_supplement_path,
+				train_supplement_path=config.data.train_supplement_path,
 			)
 			data = repository.load(include_build_supplement=include_build_supplement)
 			return cls(
@@ -674,7 +675,7 @@ class LoRATrainingBatchRepository:
 			"threshold": config.gradient_checkpointing_threshold,
 			"group_size": group_size,
 		}
-		if full_data and self.data.supplement_fingerprint is not None:
+		if self.data.supplement_fingerprint is not None:
 			metadata["training_supplement_sha256"] = self.data.supplement_fingerprint
 		key = self._cache.key(metadata)
 		payload = self._plans.get(key)
@@ -745,9 +746,7 @@ class LoRATrainingBatchRepository:
 			local_weights_sha256=self._local_weights_sha256,
 			backbone_hidden_size=self._backbone_hidden_size,
 			tokenizer_key=self.token_cache.tokenizer_key,
-			training_supplement_sha256=self.data.supplement_fingerprint
-			if full_data
-			else None,
+			training_supplement_sha256=self.data.supplement_fingerprint,
 		)
 
 	@staticmethod

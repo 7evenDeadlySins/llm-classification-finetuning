@@ -26,7 +26,7 @@ class PairwiseText:
 
 @dataclass(frozen=True, slots=True)
 class ModelData:
-	"""Validated original/build references and canonical model inputs."""
+	"""Validated real/supplement references and canonical model inputs."""
 
 	reference: pd.DataFrame
 	canonical_texts: tuple[PairwiseText, ...]
@@ -140,12 +140,14 @@ class ModelDataRepository:
 		serializer: ConversationSerializer,
 		validation_fraction: float | None = None,
 		build_supplement_path: Path | None = None,
+		train_supplement_path: Path | None = None,
 	) -> None:
 		self._loader = TrainingInputLoader(
 			processed_path, validation_fraction=validation_fraction
 		)
 		self._serializer = serializer
 		self._build_supplement_path = build_supplement_path
+		self._train_supplement_path = train_supplement_path
 
 	@property
 	def serializer_version(self) -> str:
@@ -158,8 +160,16 @@ class ModelDataRepository:
 		data = inputs.data
 		fingerprint = inputs.fingerprint
 		supplement_fingerprint = None
-		if include_build_supplement and self._build_supplement_path is not None:
-			supplement = BuildSupplementLoader(self._build_supplement_path).load(inputs)
+		scope = "build" if include_build_supplement else "train"
+		supplement_path = (
+			self._build_supplement_path
+			if include_build_supplement
+			else self._train_supplement_path
+		)
+		if supplement_path is not None:
+			supplement = BuildSupplementLoader(supplement_path, scope=scope).load(
+				inputs
+			)
 			data = pd.concat(
 				[data, supplement.data.loc[:, list(self.REQUIRED_COLUMNS)]],
 				ignore_index=True,

@@ -18,6 +18,16 @@ For Colab and the local VS Code notebook workflow, see
 [Colab setup and persistence](docs/colab.md). To submit a build to Kaggle, see
 [Kaggle submission notebook](docs/kaggle-submission.md).
 
+The current real-only dataset has **246,251 rows**: **234,756 train** and
+**11,495 frozen Kaggle validation** rows. It combines Kaggle, LMSYS, Arena human,
+Arena expert, and HelpSteer3 preference with hard labels. All 1,686 rows above
+the old token ceiling are retained without truncation; current model and warmup
+limits are **105,221 tokens**, the maximum complete branch length. Rebuild and
+audit instructions are in [data preparation](docs/data-preparation.md#merged-external-preferences).
+Data preparation tools live in [data/](data/), including
+[the external-data merger](data/merge_external_data.py) and
+[the synthetic tie generator](data/generate_synthetic_tie.py).
+
 ## Model profiles
 
 Selectors and YAML section names are case-sensitive.
@@ -28,10 +38,18 @@ Selectors and YAML section names are case-sensitive.
 | `SR2-Qwen3-4B-lora` | `SR2_Qwen3_4B_lora` | Skywork reward-trained Qwen3-4B LoRA; swap-equivariant three-class head |
 
 Both profiles consume the saved train/validation split and train and predict on
-original A/B orientations only. Model builds additionally append the configured
-[synthetic tie supplement](docs/data-preparation.md#build-only-synthetic-ties);
-validation and standalone warmup retain the saved original partitions. `ALL`
+original A/B orientations only. Current presets use the
+[merged real preference dataset](docs/data-preparation.md#merged-external-preferences)
+with hard labels and a frozen Kaggle holdout. Separate self-response tie
+supplements bring the training tie share closest to Kaggle's **30.9480%**:
+**16,759** additions for validation training and standalone warmup (**251,515**
+training rows), or **16,758** for full-data builds (**263,009** rows).
+The 11,495 real validation rows remain unchanged. See
+[synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties). `ALL`
 runs configured frozen SR2 before LoRA.
+Both profiles pool the last real token of each branch before the comparison
+head. LoRA joint training and validation use the same pooling as frozen SR2
+and head warmup.
 The frozen model has independent training settings and shares
 compatible head/feature caches with LoRA warmup and the separate `warmup --build`
 selector. Retired Qwen profiles and
@@ -47,6 +65,8 @@ their historical artifacts are described in [migration](docs/migration.md).
 | [Commands](docs/commands.md) | Select modes, checkpoints, cache refresh, and batch validation |
 | [Configuration](docs/configuration.md) | Look up YAML fields, defaults, paths, GPU settings, and token budgets |
 | [Data preparation](docs/data-preparation.md) | Understand grouping, balancing, original-only rows, and the processed schema |
+| [External training data](docs/external-training-data.md) | Browse candidate multi-turn human preference datasets with native ties |
+| [Recommended external data](docs/recommended-external-data.md) | Top 3 vetted external preference datasets, adopted deduplication rules, and reference usage notes |
 | [Model workflows](docs/models.md) | Validate/build frozen or LoRA SR2, and inspect build outputs |
 | [LoRA training](docs/lora.md) | Understand the head, warmup, batching, checkpointing, and memory controls |
 | [Caching and Python APIs](docs/caching.md) | Check reuse conditions, multipart storage, and CPU preparation APIs |

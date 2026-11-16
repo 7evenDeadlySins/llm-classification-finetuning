@@ -113,7 +113,7 @@ mirror, pass an optional source root:
 uv run python scripts/validate.py --data-source-root /content/drive/MyDrive/llm-classification-finetuning
 ```
 
-The mirror preserves project-relative paths: `data/processed/lmsys33k/` is looked
+The mirror preserves project-relative paths: `data/processed/external_merged/` is looked
 up beneath that root. Relative source roots resolve from the project root; `~`
 is expanded. Without this argument, only local data is checked. A complete local
 artifact does not access the source root. An absolute processed path outside the
@@ -154,7 +154,8 @@ Standalone warmup and full-data builds use different training ID sets; see
 `<RESULT_PATH>/logs/build-*.log`.
 
 Before launching a task, the build script loads its YAML and ensures the resolved
-`data.processed_path` and, for model builds, `data.build_supplement_path` using the same pipeline as
+`data.processed_path` plus `data.build_supplement_path` for model builds, or
+`data.train_supplement_path` for standalone warmup, using the same pipeline as
 [batch validation](#batch-validation). Complete local data is reused; pass an
 optional project mirror to fill missing processed-data files:
 
@@ -162,8 +163,9 @@ optional project mirror to fill missing processed-data files:
 uv run python scripts/build.py --data-source-root /content/drive/MyDrive/llm-classification-finetuning
 ```
 
-Standalone warmup prepares only the original dataset. Preparation reuse keys
-include both required paths, so a prior warmup does not skip supplement recovery.
+Validation and standalone warmup prepare the real dataset and the configured
+train supplement. Preparation reuse keys include the real and selected supplement
+paths, so one training scope does not skip another scope's supplement recovery.
 
 Paths beneath the mirror follow the selected YAML rather than a fixed dataset
 directory. Single Parquet files and manifest-plus-volume artifacts are supported,

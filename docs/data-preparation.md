@@ -63,8 +63,8 @@ is the compressed Parquet published. Failure leaves the previous dataset in plac
 ## Processed data
 
 The repository-backed logical path is `data/processed/train_validation.parquet`.
-The current presets consume the prebuilt Kaggle + LMSYS dataset at
-`data/processed/lmsys33k/train_validation.parquet`, which is not included in Git.
+The current presets consume the merged real preference dataset at
+`data/processed/external_merged/train_validation.parquet`, which is not included in Git.
 Keep `data.processed_path` pointing to the logical Parquet path whether it is a
 single file or multipart:
 
@@ -89,71 +89,226 @@ with these additions:
 | `split` | `train` or `validation` |
 | `is_swapped` | Always `False`; retained for model batch and result metadata |
 
-Each ID has exactly one original row, preserving source order. No original ID
-is dropped. Input loading rejects missing values, invalid labels, nonboolean
+Each retained ID has exactly one original row. Kaggle preparation preserves all
+original IDs; external integration applies the cleaning and voting rules below.
+Input loading rejects missing values, invalid labels, nonboolean
 `is_swapped` values, swapped rows, duplicate IDs, and prompt groups crossing
 partitions. Older augmented datasets must have their `is_swapped=True` rows
 removed before loading.
 
-The prebuilt Kaggle + LMSYS dataset freezes the Kaggle validation IDs before
-appending external rows to train. Its configuration consumes that saved artifact;
-do not run `init` or `preprocess` with it to recreate the combined dataset.
-Construction details and source statistics are in its local `summary.json`.
+## Merged external preferences
 
-## Build-only synthetic ties
+Current presets consume Kaggle + complete LMSYS 33K + Arena human + Arena expert
++ HelpSteer3 preference, constructed using the
+[adopted processing rules](recommended-external-data.md#已确定的处理原则).
+All targets are hard labels with integer one-hot winner fields. HelpSteer3 uses
+the sign of `overall_preference`, without strength weighting. Rows have equal
+training weight. The saved real-data table retains its natural class proportions;
+model training appends the [scope-specific synthetic ties](#scope-specific-synthetic-ties).
 
-The current LMSYS33K presets specify `data.build_supplement_path` as
-`data/synthetic_tie/lmsys33k/synthetic_ties.parquet`. Generate it from the complete
-77,527-row original table, using the locally cached configured tokenizer:
+Rebuild from the project root with:
 
 ```powershell
-uv run python scripts/generate_synthetic_tie.py --config config.yaml
+uv run python data/merge_external_data.py --config config.yaml
 ```
 
-The generator never rebuilds the holdout. It groups complete normalized prompt
-JSON, excludes groups containing any tie, and merges identical normalized
-`(prompt, response)` candidates while retaining every source occurrence. A
-single original battle is sufficient. Historical win rates are exact fractions
-of wins over occurrences; selected unique candidates receive equal weight.
+`--baseline-path` defaults to `data/processed/lmsys33k/train_validation.parquet`;
+`--output-dir` defaults to `data/processed/external_merged`. The baseline's
+57,477 Kaggle rows, including all 11,495 frozen validation IDs, are copied with
+their existing fields and membership. LMSYS is rebuilt from its complete raw
+33,000-row release rather than the old prompt-deduplicated subset. All external
+rows enter `split="train"` with `is_swapped=False`.
 
-Each selection minimizes the number already selected for its prompt, then the
-complete official-template branch token count, minimum source ID, and A before
-B. Counts start at zero. Full-loss/full-win replacements (with strictly longer
-added branches), followed when needed by an exact adjustment involving a
-half-win candidate, preserve the initially covered prompts and make the mean
-exactly `1/2`.
-Infeasible adjustments fail with a diagnostic audit rather than changing rules.
+The downloader pins official repository commits, verifies official LFS SHA-256
+checksums, and retains source files and `sources.json` under `data/raw/external/`.
+Initial downloads need network access and offline mode disabled; complete locked
+inputs can be reused offline. Token counting uses the pinned SR2 tokenizer,
+official template, and shared token cache without truncation. Preparation reuses
+existing full-encoding lengths and persists new exact counts in a compact length
+cache, avoiding a second complete token-array copy on disk. Samples above the
+old 13,866-token ceiling remain in the dataset. All preset model and warmup
+`max_length` values are set to the resulting maximum complete branch length.
+No GPU or model weights are required.
 
-The independent supplement contains 1,012 unswapped self-response ties, with an
-exact historical win-rate sum of `506` and equal-weight mean of `1/2`. A/B
-responses and models both come from the minimum-ID source occurrence (A wins a
-side tie). IDs start at the maximum original ID plus one, in token/source order.
-`split="build"` distinguishes supplemental membership; `source_original_id`,
-`source_side`, `source_split`, dataset provenance, historical wins/occurrences,
-and `candidate_id` retain traceability. Parquet metadata pins the original
-reconstructed SHA-256, generation algorithm, and tokenizer/template identity.
+Kaggle IDs stay unchanged. LMSYS, Arena human, Arena expert, and HelpSteer3 use
+ID segments `1`, `2`, `3`, and `4` respectively: `segment * 2**32 + source_row_index`.
+HelpSteer3 indexes train then validation consecutively. Provenance includes
+`source`, `source_id`, `source_row_index`, `source_split`, `source_winner`, and
+`vote_id`; `original_label` and `tie_corrected` record conversion before vote merging.
 
-Both model builds append these rows after the saved originals, including rows
-derived from validation prompts. Validation and standalone `warmup --build`
-ignore the supplement completely. Their partitions remain 66,032 train and
-11,495 validation rows; model builds and inline build warmup use 78,539 rows.
-The class totals change from `[27381, 26852, 23294]` to `[27381, 26852, 24306]`,
-and tie share changes from 30.0463064481% to 30.9476820433% (`24306/78539`).
-The target is the old Kaggle-only, nonsynthetic ratio `17788/57477`
-(30.9480313865%). Exact rational comparison of the adjacent integer schemes
-selects 1,012 additions: the ideal fractional count is `40181038/39689`, and
-1,012 produces a smaller share error than 1,013. The generator records this
-calculation and rejects a fixed count that is not the nearest integer scheme.
+The output directory contains the logical Parquet and its storage components,
+unchanged `validation_ids.csv`, pinned `sources.json`, and these audits:
 
-The output directory also contains `candidates.parquet` (all source occurrences
-in `sources_json`), `selection.jsonl`, `replacements.jsonl`, `prompt_counts.csv`
-(including zero counts), `summary.json`, and `checksums.sha256`. All files are
-staged and checked before directory promotion; failures preserve diagnostics
-and leave any previous successful output intact. Large Parquet outputs use the
-same manifest/parts storage policy. Keep the whole directory for audits; only
-the supplement Parquet and its components are required for training. Configured
-missing, corrupt, or source-mismatched supplements cause builds to fail before
-GPU setup. See [cache identities](caching.md#identity).
+| Artifact | Contents |
+| --- | --- |
+| `row_audit.parquet` | One disposition for every raw external input row |
+| `conversion_audit.parquet` | Text/role/history parsing, original and corrected labels, exclusions |
+| `dedup_audit.parquet` | Battle and vote identities, A/B direction, vote participation, retained IDs |
+| `vote_counts.parquet` | Independent vote counts in representative A/B order and the final hard label |
+| `token_stats.parquet` | Complete branch lengths for Kaggle and candidate external representatives |
+| `summary.json`, `checksums.sha256` | Counts, identities, integrity checks, and file hashes |
+
+Publication is staged and read back through `TrainingInputLoader`; failed builds
+retain their diagnostics and preserve any prior successful dataset. Current
+presets set `validation.validation_fraction` to `11495 / total_rows` and configure
+the two independent supplement paths described below. Use this dedicated merger to rebuild the
+combined dataset; `init` and `preprocess` rebuild a Kaggle-only split.
+
+The 2026-11-17 build contains 246,251 rows: 234,756 train and the frozen 11,495
+validation rows. Its full-table validation fraction is `0.046680013482178755`.
+It retains 1,686 rows above the old token ceiling, with a maximum complete branch
+length of 105,221 tokens. No rows were removed for length. The reconstructed
+Parquet SHA-256 is
+`f58665731511d440cc9f1f51708a50d4a8f3f35d00514cab6ce07ee38f0d6190`.
+
+| Representative source | Train rows | Validation rows |
+| --- | ---: | ---: |
+| Kaggle | 45,982 | 11,495 |
+| LMSYS | 24,227 | 0 |
+| Arena human | 135,518 | 0 |
+| Arena expert | 3,372 | 0 |
+| HelpSteer3 preference | 25,657 | 0 |
+
+Source counts identify retained representatives; cross-source votes remain in
+the audits and receive equal weight during label selection. The build excludes
+20 battles with tied highest vote counts, 12 unalignable Arena human records,
+and one non-text expert record. All source rows are accounted for in
+`row_audit.parquet`, including duplicate votes and validation/Kaggle overlaps.
+
+External-data integration deduplicates battles by complete prompt context and
+response pair, including A/B-swapped duplicates. Retain all distinct response
+pairs for the same prompt, including external samples sharing a prompt with
+Kaggle **training** rows. External samples sharing a prompt with the frozen
+Kaggle **validation** partition are excluded. `group_id` remains the prompt
+grouping and validation-isolation key; it is not sufficient to identify a
+duplicate training sample. See the [adopted processing rules](recommended-external-data.md#已确定的处理原则).
+
+Only Kaggle takes source precedence for duplicate battles. LMSYS and all other
+external datasets have equal standing, regardless of whether they are already
+in the saved training table or carry expert annotations.
+
+External conversion workflows use the public preprocessing API after converting
+source conversations into the project's JSON-array fields:
+
+```python
+from llm_classification_finetuning.preprocess import ExternalBattleDeduplicator
+
+result = ExternalBattleDeduplicator().deduplicate(
+    external_rows, existing_rows, merge_votes=True
+)
+retained_rows = result.data
+dedup_audit = result.audit
+vote_counts = result.vote_counts
+```
+
+Both inputs need `id`, `prompt`, `response_a`, and `response_b`; `existing_rows`
+also needs its saved `split` values. Vote merging additionally requires `label`
+and `vote_id` on external rows. Pass only original Kaggle rows from both saved
+partitions as `existing_rows`. Validation prompt exclusion precedes battle
+matching. Independent votes are counted once in a common A/B direction; the
+unique highest-count class becomes the final hard label. Highest-count ties
+are excluded, while successful groups retain the smallest-ID representative's
+content and orientation. Conflicting copies of one vote stop publication.
+Statuses include `retained`, `merged_vote`, `duplicate_vote`, `duplicate_training`,
+`excluded_validation_prompt`, and `excluded_vote_tie`. Token statistics retain
+every candidate; no row is excluded for exceeding the old length ceiling.
+Conversation identity normalizes JSON encoding
+without trimming text or changing case, and compares complete response arrays
+independently of A/B order.
+
+To apply the adopted source policy with this API, pass only Kaggle rows as
+`existing_rows`, preserving their frozen split values, and combine LMSYS with
+the other external datasets in `external_rows`. Passing the entire saved
+Kaggle + LMSYS table as `existing_rows` would incorrectly give LMSYS precedence
+over other external sources.
+
+The optional `merge_votes=False` default retains the older first-occurrence API
+for callers that only require battle filtering. The dedicated merger always
+enables vote merging. Historical Kaggle/LMSYS snapshots remain available.
+
+## Scope-specific synthetic ties
+
+The real-data merger preserves natural labels and counts. Current presets append
+independent self-response ties during training to match the corrected Kaggle-only
+ratio `17788/57477` (30.9480313865%) as closely as an integer addition permits.
+This restores the old synthesis rules for the merged real dataset.
+
+```powershell
+uv run python data/generate_synthetic_tie.py --config config.yaml --scope all
+```
+
+`--scope train|build|all` defaults to `all`, generating every configured scope.
+An explicit scope requires its corresponding path. The optional
+`data.train_supplement_path` and `data.build_supplement_path` default to `null`.
+Current presets use `data/synthetic_tie/external_merged/train/synthetic_ties.parquet`
+and `data/synthetic_tie/external_merged/build/synthetic_ties.parquet` respectively.
+They live in separate directories so staged publication cannot replace the other scope.
+
+| Scope | Real rows / ties | Added ties | Training rows / ties | Resulting tie share |
+| --- | --- | ---: | --- | --- |
+| Validation training and standalone warmup | 234,756 / 61,080 | 16,759 | 251,515 / 77,839 | 30.9480547880% |
+| Model build and inline build warmup | 246,251 / 64,638 | 16,758 | 263,009 / 81,396 | 30.9479903730% |
+
+For original count `N`, tie count `T` and target `p`, the ideal addition is
+`(p*N - T)/(1-p)`. Compare the resulting tie-share errors of the adjacent
+nonnegative integer counts using exact fractions; choose the smaller count on
+an exact error tie. No additions are needed if the target is already met or exceeded.
+
+Train candidates and historical win statistics use real `split="train"` rows
+only, excluding frozen validation prompts. Build candidates use both real
+partitions. Neither scope uses synthetic rows as source data. Group complete
+normalized prompt JSON, exclude groups containing any real tie, and merge
+identical normalized `(prompt, response)` candidates while retaining every source
+occurrence. Historical scores are exact wins/occurrences fractions based on the
+retained hard-labeled battles, with no additional vote or source weighting.
+
+Each selection minimizes its prompt's current selected count, then complete
+branch tokens, minimum source ID, and A before B. Counts start at zero.
+Full-loss/full-win replacements require a strictly longer added branch;
+when possible, the original single half-win adjustment completes the score.
+If fractional histories prevent that step, choose an exact correction of one or
+two same-prompt swaps. Prefer fewer swaps, then the smallest total token-length
+change, then the existing candidate order. Apply negative score changes first
+to avoid overshooting the target. Preserve the initially covered prompts and make the equal-weight
+mean exactly `1/2`: score sums are `16759/2` for train and `8379` for build.
+An infeasible adjustment fails with diagnostics rather than relaxing these rules.
+Complete official-template lengths first reuse the real-data merger's statistics
+when source, tokenizer/template identities and the statistics SHA-256 match.
+Otherwise they use the shared content cache, without truncation.
+
+A/B replies and model names both come from the minimum-ID source occurrence
+(A wins a side tie). Each artifact assigns IDs from the maximum real ID plus one
+in token/source order; artifacts are mutually exclusive. Train supplement rows
+have `split="train"`; build rows have `split="build"`. Provenance records the
+source row, side, original partition and dataset, historical counts and candidate ID.
+Metadata schema v2 pins the real reconstructed SHA-256, scope, calculated count,
+exact target and score sum, generation algorithm, and tokenizer/template identity.
+The loader independently checks count, source membership, history and validation isolation.
+
+Both SR2 profiles and standalone warmup select only the train supplement for
+holdout training. Full-data builds select only the build supplement, including
+inline warmup. The frozen 11,495-row validation set and the saved real table are
+unchanged; `validation.validation_fraction` continues to describe the real table.
+Supplement content enters training, batch-plan and warmup cache identities.
+Matching content-based token and frozen-feature caches remain reusable.
+
+Each directory also contains `candidates.parquet` (all occurrences in
+`sources_json`), `selection.jsonl`, `replacements.jsonl`, `prompt_counts.csv`
+(including zero selections), `summary.json`, and `checksums.sha256`. Files are
+staged, read back and checked before publication. Large candidate audits stream
+directly into bounded volumes; a failed run preserves its
+diagnostics and the previous successful artifact. Large Parquet files follow
+the shared manifest/parts policy. Only the supplement Parquet and its storage
+components are required for training; retain the directory for the full audit.
+Missing, corrupt, wrong-scope or source-mismatched configured supplements fail loading.
+
+### Historical LMSYS33K supplement
+
+The original build-only artifact remains at `data/synthetic_tie/lmsys33k/`.
+It has 1,012 ties for the 77,527-row snapshot, an exact score sum of `506`,
+and a final tie share of `24306/78539` (30.9476820433%). Its schema v1 remains
+loadable for its matching historical build, but cannot supply current train or
+merged-data builds. It is not replaced or reused by the new generation command.
 
 ### Conversation serialization
 
