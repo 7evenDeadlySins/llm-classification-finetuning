@@ -130,7 +130,7 @@ Package `__init__.py` files expose intended public interfaces unless noted.
 | `pipeline.py` | `PrepareDataPipeline`: download/preprocessing orchestration and optional download-progress callback; `EnsureProcessedDataPipeline`: local processed-data checks and optional project-mirror restoration without preprocessing |
 | `data/downloader.py` | Missing Kaggle training CSV download and single-file ZIP normalization |
 | `data/external.py` | Pinned official dataset identities, download/reuse and LFS checksum verification, raw source lock manifest |
-| `external_pipeline.py` | `MergeExternalDataPipeline`: frozen Kaggle baseline, conversion/voting orchestration, complete branch length statistics without length filtering/truncation, staged audits, publication and readback checks |
+| `external_pipeline.py` | `MergeExternalDataPipeline`: frozen Kaggle baseline, conversion/voting orchestration, complete branch length statistics, whole-battle model-context exclusion without truncation, staged audits, publication and readback checks |
 | `preprocess/external.py` | Strict text-only source adapters, restricted NumPy container-representation decoder, Arena history alignment, HelpSteer sign labels and source vote identities |
 | `preprocess/deduplication.py` | `ExternalBattleDeduplicator`: complete-prompt/unordered-pair identities, validation exclusion, optional independent hard-vote merging, conflicting-vote diagnostics and representative/status/count audits |
 | `preprocess/splits.py` | Exact-response tie correction before labels/prompt hashes, grouped class quotas, balance orchestration, original-only integrity summaries, and processed publication |
@@ -237,7 +237,7 @@ defaults to `./results` and controls validation, report, and log roots.
 | `data/processed/train_validation.parquet` | Logical saved split; single file or manifest plus volumes |
 | `data/processed/lmsys33k/` | Historical Kaggle + LMSYS snapshot, also the frozen Kaggle baseline for the merger |
 | `data/processed/external_merged/` | Current merged real-only hard-label data, frozen validation IDs, conversion/vote/token audits and checksums |
-| `data/synthetic_tie/external_merged/train/`, `build/` | Mutually exclusive train/build synthetic ties and generation audits |
+| `data/synthetic_tie/external_merged/context40960/train/`, `build/` | Mutually exclusive train/build synthetic ties and generation audits for the context-filtered real data |
 | `data/synthetic_tie/lmsys33k/` | Historical build supplement and audits; disabled in current presets |
 | `<CACHE_PATH>/token_cache/`, `embedding_cache/`, `adapter_batches/plans/` | Shared token, frozen/warmup-feature, and LoRA base-plan stores |
 | `<CACHE_PATH>/SR2_Qwen3_4B_lora_warmup/` | Completed Skywork head state, shared by frozen SR2, LoRA SR2, and standalone warmup |
@@ -427,6 +427,8 @@ present in a fresh checkout.
 11. **Publication:** stage generated artifacts before exposure. `CacheStorage`
     owns locks/checksums/multipart policy; report promotion restores previous
     output where recoverable. Preserve explicit failures and backup paths.
+    Real-data and synthetic-tie staging directories inherit project permissions
+    on Windows; do not publish `mkdtemp` directories with private ACLs.
 12. **Metrics and history:** frozen SR2 validation ignores fixed epoch counts,
     steps `ReduceLROnPlateau.patience` down by `1` and resets the early-stopping
     counter whenever `early_stopping` consecutive epochs fail to strictly lower

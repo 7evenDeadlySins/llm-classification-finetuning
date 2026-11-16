@@ -7,13 +7,13 @@ import hashlib
 import heapq
 import json
 import shutil
-import tempfile
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -229,7 +229,9 @@ class SyntheticTieGenerator:
 		"""Stage all files, validate readback, and promote only a complete run."""
 		work_root = self.output.parent / ".cache-work"
 		work_root.mkdir(parents=True, exist_ok=True)
-		stage = Path(tempfile.mkdtemp(prefix="synthetic-tie-", dir=work_root))
+		# Inherit the project ACL; mkdtemp's private Windows ACL survives renames.
+		stage = work_root / f"synthetic-tie-{uuid4().hex}"
+		stage.mkdir()
 		stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
 		try:
 			self._load()

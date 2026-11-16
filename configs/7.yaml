@@ -6,11 +6,11 @@ data:
   competition: llm-classification-finetuning
   raw_dir: data/raw
   processed_path: data/processed/external_merged/train_validation.parquet
-  train_supplement_path: data/synthetic_tie/external_merged/train/synthetic_ties.parquet
-  build_supplement_path: data/synthetic_tie/external_merged/build/synthetic_ties.parquet
+  train_supplement_path: data/synthetic_tie/external_merged/context40960/train/synthetic_ties.parquet
+  build_supplement_path: data/synthetic_tie/external_merged/context40960/build/synthetic_ties.parquet
 
 validation:
-  validation_fraction: 0.046680013482178755
+  validation_fraction: 0.04669935689358884
   random_state: 42
   tokenizer_name: Skywork/Skywork-Reward-V2-Qwen3-4B
   tokenizer_revision: fd958fef475f323f4e6b195930e3dd918485c668
@@ -28,7 +28,7 @@ SR2_Qwen3_4B:
   early_stopping: 7
   label_smoothing: 0.0
   model_name: Skywork/Skywork-Reward-V2-Qwen3-4B
-  max_length: 105221
+  max_length: 40960
   hidden_size: 128
   dropout: 0.1
   build_epochs: 37
@@ -45,7 +45,7 @@ SR2_Qwen3_4B:
 warmup:
   label_smoothing: 0.0
   model_name: Skywork/Skywork-Reward-V2-Qwen3-4B
-  max_length: 105221
+  max_length: 40960
   hidden_size: 128
   dropout: 0.1
   build_epochs: 9
@@ -62,7 +62,7 @@ warmup:
 SR2_Qwen3_4B_lora:
   label_smoothing: 0.0
   model_name: Skywork/Skywork-Reward-V2-Qwen3-4B
-  max_length: 105221
+  max_length: 40960
   gradient_checkpointing_threshold: 12544
   gradient_checkpointing_budget: 147456
   training_batch_size: 1

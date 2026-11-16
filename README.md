@@ -18,11 +18,12 @@ For Colab and the local VS Code notebook workflow, see
 [Colab setup and persistence](docs/colab.md). To submit a build to Kaggle, see
 [Kaggle submission notebook](docs/kaggle-submission.md).
 
-The current real-only dataset has **246,251 rows**: **234,756 train** and
+The current real-only dataset has **246,149 rows**: **234,654 train** and
 **11,495 frozen Kaggle validation** rows. It combines Kaggle, LMSYS, Arena human,
-Arena expert, and HelpSteer3 preference with hard labels. All 1,686 rows above
-the old token ceiling are retained without truncation; current model and warmup
-limits are **105,221 tokens**, the maximum complete branch length. Rebuild and
+Arena expert, and HelpSteer3 preference with hard labels. It retains 1,584 rows
+above the old token ceiling and excludes 102 battles exceeding the pinned model
+context, without truncation. Model and warmup limits are **40,960 tokens**;
+the longest retained branch has **40,953 tokens**. Rebuild and
 audit instructions are in [data preparation](docs/data-preparation.md#merged-external-preferences).
 Data preparation tools live in [data/](data/), including
 [the external-data merger](data/merge_external_data.py) and
@@ -42,8 +43,8 @@ original A/B orientations only. Current presets use the
 [merged real preference dataset](docs/data-preparation.md#merged-external-preferences)
 with hard labels and a frozen Kaggle holdout. Separate self-response tie
 supplements bring the training tie share closest to Kaggle's **30.9480%**:
-**16,759** additions for validation training and standalone warmup (**251,515**
-training rows), or **16,758** for full-data builds (**263,009** rows).
+**16,761** additions for validation training and standalone warmup (**251,415**
+training rows), or **16,760** for full-data builds (**262,909** rows).
 The 11,495 real validation rows remain unchanged. See
 [synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties). `ALL`
 runs configured frozen SR2 before LoRA.

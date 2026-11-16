@@ -9,13 +9,13 @@
 **数据混合与类别比例**：清洗、去重并完成验证集隔离后，全部真实样本合并训练，按行等权；不按来源额外加权或重采样，也不采用按来源划分的两阶段训练。Kaggle 的重复对局保留优先级仅用于去重，不赋予其更高训练权重。
 
 * **真实数据保留自然比例，训练时补齐 tie**：真实合并表保留全部自然类别比例；训练时追加独立自回复平局，使 tie 比例最接近 Kaggle 的 `17788/57477`（约 `30.9480%`）。不额外设置类别权重或重采样，全部真实及合成训练行等权。
-* **恢复旧合成规则（2026-11-17）**：重新计算并分别生成 train 与 build 补充集，不复用旧的 1,012 条产物。验证训练和独立 warmup 仅从真实 train 取候选及统计历史胜率，补 16,759 条；全量 build 及其内置 warmup 从全部真实数据取候选，补 16,758 条。两份补充集互斥加载，历史胜率均值均须精确为 `1/2`；验证集不追加合成行。配置分别使用 `data.train_supplement_path` 与 `data.build_supplement_path`，详见[生成规则](data-preparation.md#scope-specific-synthetic-ties)。
+* **恢复旧合成规则（2026-11-17）**：重新计算并分别生成 train 与 build 补充集，不复用旧的 1,012 条产物。移出模型上下文超限样本后，验证训练和独立 warmup 仅从真实 train 取候选及统计历史胜率，补 16,761 条；全量 build 及其内置 warmup 从全部真实数据取候选，补 16,760 条。两份补充集互斥加载，历史胜率均值均须精确为 `1/2`；验证集不追加合成行。配置分别使用 `data.train_supplement_path` 与 `data.build_supplement_path`，详见[生成规则](data-preparation.md#scope-specific-synthetic-ties)。
 
 合成时保留原有初选与全胜替换；若历史分数中的 `1/3` 等比例使最后一次半胜替换不可行，允许用一次或两次同 prompt 的精确分数替换完成调整。优先使用更少的替换，再比较总 token 长度变化和原有候选顺序；先执行降低分数的步骤，始终保留初始 prompt 覆盖与补充条数，最终均值仍须精确为 `1/2`。
 
 **全部使用硬标签**：以 `response1` 为 A、`response2` 为 B，HelpSteer3 的 `overall_preference < 0` 映射为 A 胜（`label=0`），`> 0` 映射为 B 胜（`label=1`），`0` 映射为平局（`label=2`）。不按偏好强度生成软标签、加权或删除弱偏好样本。每条原始记录的 `overall_preference` 计一票，不拆分 `individual_preference`。
 
-**语言与领域全部保留**：不按自然语言、任务领域或职业标签筛选样本。非英文内容保留原文，直接使用现有 tokenizer 与训练流程，不翻译；仍执行结构校验、去重与验证集隔离。完整统计分支长度，超出旧 `13866` token 上限的样本同样保留且不截断；配置的 `max_length` 随最终数据的真实最大分支长度更新。
+**语言与领域全部保留**：不按自然语言、任务领域或职业标签筛选样本。非英文内容保留原文，直接使用现有 tokenizer 与训练流程，不翻译；仍执行结构校验、去重与验证集隔离。完整统计分支长度，超出旧 `13866` token 上限但未超过原模型上下文的样本保留且不截断。任一完整分支超过固定模型版本的 `max_position_embeddings=40960` 时，整条对局移出训练集并单独保存；不按 A+B 长度之和筛除。当前模型及 warmup 的 `max_length` 同步设为 `40960`。
 
 * HelpSteer3 的 General、STEM、Code、Multilingual 四个领域全部纳入；其 Code 域的 `language` 表示编程语言，不能据此当作非英文样本排除。
 * Arena human 的代码、数学、创意写作、指令遵循等类别，以及 Arena expert 的全部 `occupational_tags` 均保留，不据此过滤。
@@ -64,7 +64,7 @@
 * **优先度最高**：采集时间晚于 2024 年 Kaggle 竞赛与 `Skywork-Reward-V2` 发布时间，原生 4 类标签与任务分布最贴合。
 * **内容解析与多模态排除**：`conversation_a` / `conversation_b` 中每条消息的 `content` 为字典列表（如 `[{"type": "text", "text": ..., "image": null, "mimeType": null}]`）。纯文本内容按原顺序提取拼接；当前对话或需回填的历史含实际非文本内容时整条排除，空回复沿用上述已确定规则。
 * **处理 `evaluation_order > 1`**：`conversation_a/b` 保存当前评估的对话，可能包含多轮；此前评估的历史保存在 `full_conversation`（模型侧键名为 `model_side_a` / `model_side_b`）。按上述已确定原则为每条有效投票补全对应的 A/B 上下文，保留当前评估的标签；历史回复可能来自此前评估的其他模型。字段定义见[官方数据集说明](https://huggingface.co/datasets/lmarena-ai/arena-human-preference-140k#overview)。
-* **完整长度统计**：序列最长可达 128 条消息，用固定版本的 `Skywork/Skywork-Reward-V2-Qwen3-4B` tokenizer（`sr2-qwen3-chat-template-v1`）统计分支长度。超限样本不排除、不截断，模型及 warmup 的 `max_length` 更新为成品的真实最大分支长度。
+* **完整长度统计**：序列最长可达 128 条消息，用固定版本的 `Skywork/Skywork-Reward-V2-Qwen3-4B` tokenizer（`sr2-qwen3-chat-template-v1`）统计完整分支长度；任一分支超过模型的 `40960` token 上限时整条移出，不截断后沿用原标签。
 
 ### 2. `lmarena-ai/arena-expert-5k`
 

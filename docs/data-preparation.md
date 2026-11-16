@@ -126,9 +126,13 @@ inputs can be reused offline. Token counting uses the pinned SR2 tokenizer,
 official template, and shared token cache without truncation. Preparation reuses
 existing full-encoding lengths and persists new exact counts in a compact length
 cache, avoiding a second complete token-array copy on disk. Samples above the
-old 13,866-token ceiling remain in the dataset. All preset model and warmup
-`max_length` values are set to the resulting maximum complete branch length.
-No GPU or model weights are required.
+old 13,866-token ceiling remain eligible. After vote merging, a battle is excluded
+if either complete branch exceeds the pinned model configuration's
+`max_position_embeddings` (40,960 tokens). The limit applies to each branch,
+not their sum; excluded conversations are saved intact without truncation.
+All current preset model and warmup `max_length` values are 40,960.
+Only the model configuration and tokenizer are loaded; no GPU or model weights
+are required.
 
 Kaggle IDs stay unchanged. LMSYS, Arena human, Arena expert, and HelpSteer3 use
 ID segments `1`, `2`, `3`, and `4` respectively: `segment * 2**32 + source_row_index`.
@@ -146,6 +150,7 @@ unchanged `validation_ids.csv`, pinned `sources.json`, and these audits:
 | `dedup_audit.parquet` | Battle and vote identities, A/B direction, vote participation, retained IDs |
 | `vote_counts.parquet` | Independent vote counts in representative A/B order and the final hard label |
 | `token_stats.parquet` | Complete branch lengths for Kaggle and candidate external representatives |
+| `excluded_model_context.parquet` | Complete rows excluded because either branch exceeds the pinned model context |
 | `summary.json`, `checksums.sha256` | Counts, identities, integrity checks, and file hashes |
 
 Publication is staged and read back through `TrainingInputLoader`; failed builds
@@ -154,19 +159,21 @@ presets set `validation.validation_fraction` to `11495 / total_rows` and configu
 the two independent supplement paths described below. Use this dedicated merger to rebuild the
 combined dataset; `init` and `preprocess` rebuild a Kaggle-only split.
 
-The 2026-11-17 build contains 246,251 rows: 234,756 train and the frozen 11,495
-validation rows. Its full-table validation fraction is `0.046680013482178755`.
-It retains 1,686 rows above the old token ceiling, with a maximum complete branch
-length of 105,221 tokens. No rows were removed for length. The reconstructed
-Parquet SHA-256 is
-`f58665731511d440cc9f1f51708a50d4a8f3f35d00514cab6ce07ee38f0d6190`.
+The 2026-11-17 context-filtered build contains 246,149 rows: 234,654 train and
+the frozen 11,495 validation rows. Its full-table validation fraction is
+`0.04669935689358884`. It excludes 102 over-context training battles (78 Arena
+human and 24 Arena expert) and retains 1,584 rows above the old token ceiling.
+The maximum retained complete branch is 40,953 tokens; the maximum A+B total
+is 78,827, below the current 147,456-token joint training budget. All Kaggle
+rows, validation IDs, and retained values/labels/order are unchanged. The
+previous unfiltered snapshot is preserved in a sibling backup directory.
 
 | Representative source | Train rows | Validation rows |
 | --- | ---: | ---: |
 | Kaggle | 45,982 | 11,495 |
 | LMSYS | 24,227 | 0 |
-| Arena human | 135,518 | 0 |
-| Arena expert | 3,372 | 0 |
+| Arena human | 135,440 | 0 |
+| Arena expert | 3,348 | 0 |
 | HelpSteer3 preference | 25,657 | 0 |
 
 Source counts identify retained representatives; cross-source votes remain in
@@ -210,8 +217,11 @@ unique highest-count class becomes the final hard label. Highest-count ties
 are excluded, while successful groups retain the smallest-ID representative's
 content and orientation. Conflicting copies of one vote stop publication.
 Statuses include `retained`, `merged_vote`, `duplicate_vote`, `duplicate_training`,
-`excluded_validation_prompt`, and `excluded_vote_tie`. Token statistics retain
-every candidate; no row is excluded for exceeding the old length ceiling.
+`excluded_validation_prompt`, `excluded_vote_tie`, and `excluded_model_context`.
+Token statistics retain every candidate with `retained` and
+`exceeds_model_context` flags. Length filtering follows voting, preserving
+retained vote outcomes; `dedup_status` records the original deduplication status.
+No row is excluded merely for exceeding the old length ceiling.
 Conversation identity normalizes JSON encoding
 without trimming text or changing case, and compares complete response arrays
 independently of A/B order.
@@ -240,14 +250,18 @@ uv run python data/generate_synthetic_tie.py --config config.yaml --scope all
 `--scope train|build|all` defaults to `all`, generating every configured scope.
 An explicit scope requires its corresponding path. The optional
 `data.train_supplement_path` and `data.build_supplement_path` default to `null`.
-Current presets use `data/synthetic_tie/external_merged/train/synthetic_ties.parquet`
-and `data/synthetic_tie/external_merged/build/synthetic_ties.parquet` respectively.
+Current presets use `data/synthetic_tie/external_merged/context40960/train/synthetic_ties.parquet`
+and `data/synthetic_tie/external_merged/context40960/build/synthetic_ties.parquet` respectively.
+They are regenerated against the filtered real-data fingerprint and statistics.
 They live in separate directories so staged publication cannot replace the other scope.
+Staging directories inherit project permissions on Windows, preventing private
+temporary-directory ACLs from blocking later sessions. The previous inaccessible
+train/build directories are not used by current configurations.
 
 | Scope | Real rows / ties | Added ties | Training rows / ties | Resulting tie share |
 | --- | --- | ---: | --- | --- |
-| Validation training and standalone warmup | 234,756 / 61,080 | 16,759 | 251,515 / 77,839 | 30.9480547880% |
-| Model build and inline build warmup | 246,251 / 64,638 | 16,758 | 263,009 / 81,396 | 30.9479903730% |
+| Validation training and standalone warmup | 234,654 / 61,047 | 16,761 | 251,415 / 77,808 | 30.9480341268% |
+| Model build and inline build warmup | 246,149 / 64,605 | 16,760 | 262,909 / 81,365 | 30.9479705906% |
 
 For original count `N`, tie count `T` and target `p`, the ideal addition is
 `(p*N - T)/(1-p)`. Compare the resulting tie-share errors of the adjacent

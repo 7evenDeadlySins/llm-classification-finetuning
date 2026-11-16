@@ -6,18 +6,20 @@ import gzip
 import hashlib
 import json
 import shutil
-import tempfile
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
+from transformers import AutoConfig
 
 from .config import AppConfig
 from .data import EXTERNAL_SOURCES, ExternalSourceDownloader, file_sha256
 from .errors import DataPreparationError
+from .model_storage import load_pretrained
 from .models.common import (
 	CacheStorage,
 	ConversationSerializer,
@@ -105,7 +107,9 @@ class MergeExternalDataPipeline:
 	def run(self) -> Path:
 		work = self.output.parent / ".cache-work"
 		work.mkdir(parents=True, exist_ok=True)
-		stage = Path(tempfile.mkdtemp(prefix="external-merge-", dir=work))
+		# Unlike mkdtemp's mode 0o700, inherit the project ACL on Windows.
+		stage = work / f"external-merge-{uuid4().hex}"
+		stage.mkdir()
 		stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
 		try:
 			manifest = ExternalSourceDownloader(
@@ -139,7 +143,16 @@ class MergeExternalDataPipeline:
 			)
 			audit = result.audit.copy()
 			votes = result.vote_counts.copy()
-			data = candidates.reset_index(drop=True)
+			data = self._filter_context(candidates, stats, audit, votes, stage)
+			identity.update(
+				max_length=int(
+					stats.loc[stats["retained"], ["tokens_a", "tokens_b"]].max().max()
+				),
+				length_filter=True,
+				model_context_limit=self.report["model_context"][
+					"max_position_embeddings"
+				],
+			)
 			data["id"] = data["id"].astype("int64")
 			data["label"] = data["label"].astype("int8")
 			data["is_swapped"] = data["is_swapped"].astype(bool)
@@ -149,7 +162,6 @@ class MergeExternalDataPipeline:
 			self._verify(data, baseline, fraction)
 			self._write(stage / "dedup_audit.parquet", audit)
 			self._write(stage / "vote_counts.parquet", votes)
-			stats["retained"] = True
 			self._write(stage / "token_stats.parquet", stats)
 			print(
 				f"Publishing {len(data):,} rows ({len(data) - 11495:,} train, 11,495 validation).",
@@ -198,11 +210,13 @@ class MergeExternalDataPipeline:
 					for k, v in row_audit["final_status"].value_counts().items()
 				},
 				vote_tied_battles=int(votes["status"].eq("excluded_vote_tie").sum()),
-				length_excluded_battles=0,
+				length_excluded_battles=int((~stats["retained"]).sum()),
 				retained_rows_above_previous_limit=int(
-					stats["exceeds_previous_limit"].sum()
+					(stats["exceeds_previous_limit"] & stats["retained"]).sum()
 				),
-				max_branch_tokens=int(stats[["tokens_a", "tokens_b"]].max().max()),
+				max_branch_tokens=int(
+					stats.loc[stats["retained"], ["tokens_a", "tokens_b"]].max().max()
+				),
 				checks={
 					"frozen_kaggle_rows_preserved": True,
 					"frozen_validation_ids_preserved": True,
@@ -211,7 +225,8 @@ class MergeExternalDataPipeline:
 					"no_cross_partition_prompt_overlap": True,
 					"unique_external_battles": True,
 					"all_retained_branches_nonempty": True,
-					"no_length_filter_or_truncation": True,
+					"all_retained_branches_within_model_context": True,
+					"no_truncation": True,
 					"parquet_readback_identical": True,
 					"training_input_loader_succeeded": True,
 				},
@@ -267,6 +282,56 @@ class MergeExternalDataPipeline:
 			self._json(stage / "summary.json", self.report)
 			print(f"Merge failed; diagnostics remain at {stage}", flush=True)
 			raise
+
+	def _filter_context(
+		self,
+		data: pd.DataFrame,
+		stats: pd.DataFrame,
+		audit: pd.DataFrame,
+		votes: pd.DataFrame,
+		stage: Path,
+	) -> pd.DataFrame:
+		"""Exclude whole battles exceeding the pinned backbone's per-branch limit."""
+		model = load_pretrained(
+			AutoConfig.from_pretrained, self.TOKENIZER, revision=self.TOKENIZER_REVISION
+		)
+		limit = model.max_position_embeddings
+		self._require(
+			isinstance(limit, int) and not isinstance(limit, bool) and limit > 0,
+			"The pinned model must declare a positive max_position_embeddings.",
+		)
+		self._require(
+			stats["id"].tolist() == data["id"].tolist(),
+			"Token statistics do not align with the candidate rows.",
+		)
+		excluded = stats[["tokens_a", "tokens_b"]].max(axis=1).gt(limit)
+		self._require(
+			not bool((excluded & data["source"].eq("kaggle")).any()),
+			"A frozen Kaggle row exceeds the model context; refusing to alter the baseline.",
+		)
+		stats["retained"] = ~excluded
+		stats["exceeds_model_context"] = excluded
+		excluded_ids = set(data.loc[excluded, "id"])
+		# Preserve the vote outcome and deduplication disposition for traceability.
+		audit["dedup_status"] = audit["status"]
+		audit["exceeds_model_context"] = audit["retained_id"].isin(excluded_ids)
+		audit.loc[audit["exceeds_model_context"], "status"] = "excluded_model_context"
+		votes.loc[votes["representative_id"].isin(excluded_ids), "status"] = (
+			"excluded_model_context"
+		)
+		self._write(stage / "excluded_model_context.parquet", data.loc[excluded])
+		self.report.update(
+			model_context={
+				"name": self.TOKENIZER,
+				"revision": self.TOKENIZER_REVISION,
+				"max_position_embeddings": limit,
+				"policy": "exclude_whole_battle_if_either_complete_branch_exceeds_limit",
+			},
+			candidate_max_branch_tokens=int(
+				stats[["tokens_a", "tokens_b"]].max().max()
+			),
+		)
+		return data.loc[~excluded].reset_index(drop=True)
 
 	def _load_baseline(self, stage: Path) -> pd.DataFrame:
 		with CacheStorage(self.baseline_path).open("r") as session:
@@ -461,7 +526,7 @@ class MergeExternalDataPipeline:
 	def _statistics(data: pd.DataFrame, stats: pd.DataFrame) -> list[dict]:
 		result = []
 		for (source, split), group in data.groupby(["source", "split"], sort=False):
-			tokens = stats.loc[stats["source"].eq(source) & stats["split"].eq(split)]
+			tokens = stats.loc[stats["id"].isin(group["id"])]
 			result.append(
 				{
 					"source": source,
@@ -487,6 +552,9 @@ class MergeExternalDataPipeline:
 			"All labels are hard one-hot targets; rows have equal weight. Independent votes use the unique "
 			"highest-count class after A/B alignment; highest-count ties are excluded. Kaggle duplicate battles "
 			"take precedence. No synthetic supplement is used.\n\n"
+			"Battles exceeding the pinned model's max_position_embeddings on either complete branch "
+			"are excluded without truncation and saved in excluded_model_context.parquet. "
+			"token_stats.parquet retains all candidate lengths and their retained status.\n\n"
 			"Use the project model commands with the current presets. Rebuild from the project root with "
 			"`uv run python data/merge_external_data.py`; do not run init/preprocess with these consumption configs.\n\n"
 			"Keep train_validation.parquet or its manifest and all parts together. summary.json records "
