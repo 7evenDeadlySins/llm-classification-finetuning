@@ -26,16 +26,30 @@ from ..models.common import (
 
 
 class KaggleTieDuplicateGenerator:
-	"""Duplicate Kaggle tie rows once as an audited, scope-specific supplement."""
+	"""Duplicate distinct-response Kaggle tie rows once as a scope-specific supplement."""
 
-	ALGORITHM_VERSION = "kaggle-tie-duplicate-v1"
+	ALGORITHM_VERSION = "kaggle-tie-duplicate-v3"
 	SOURCE_DATASET = "kaggle"
 	SOURCE_LABEL = 2
 	REPEAT = 1
+	EXCLUDE_IDENTICAL_AB = True
+	DEFAULT_REMOVE_COUNT = 6654
 
-	def __init__(self, config: AppConfig, *, scope: str = "train") -> None:
+	def __init__(
+		self,
+		config: AppConfig,
+		*,
+		scope: str = "train",
+		remove_count: int = DEFAULT_REMOVE_COUNT,
+	) -> None:
 		if scope not in {"train", "build"}:
 			raise DataPreparationError("Supplement scope must be 'train' or 'build'.")
+		if (
+			isinstance(remove_count, bool)
+			or not isinstance(remove_count, int)
+			or remove_count < 0
+		):
+			raise DataPreparationError("remove_count must be a non-negative integer.")
 		target_path = getattr(config.data, f"{scope}_supplement_path")
 		if target_path is None:
 			raise DataPreparationError(
@@ -43,6 +57,8 @@ class KaggleTieDuplicateGenerator:
 			)
 		self.config = config
 		self.scope = scope
+		self.remove_count = remove_count
+		self.sample_seed = config.validation.random_state
 		self.target = target_path.resolve()
 		self.output = self.target.parent
 		self.filename = self.target.name
@@ -58,6 +74,9 @@ class KaggleTieDuplicateGenerator:
 			"source_dataset": self.SOURCE_DATASET,
 			"source_label": self.SOURCE_LABEL,
 			"repeat": self.REPEAT,
+			"exclude_identical_ab": self.EXCLUDE_IDENTICAL_AB,
+			"remove_count": self.remove_count,
+			"sample_seed": self.sample_seed,
 			"status": "started",
 		}
 
@@ -139,12 +158,28 @@ class KaggleTieDuplicateGenerator:
 			if "source" in scope_data.columns
 			else scope_data["id"].lt(1 << 32)
 		)
-		sources = scope_data.loc[
+		kaggle_ties = scope_data.loc[
 			kaggle_mask & scope_data["label"].eq(self.SOURCE_LABEL)
-		].copy()
+		]
+		identical_ab = kaggle_ties["response_a"].eq(kaggle_ties["response_b"])
+		excluded_identical_ab_rows = int(identical_ab.sum())
+		sources = kaggle_ties.loc[~identical_ab].copy()
+		eligible_count = len(sources)
 		self._require(
-			not sources.empty, f"No Kaggle tie rows found for scope '{self.scope}'."
+			eligible_count > 0,
+			f"No eligible non-identical-A/B Kaggle tie rows found for scope '{self.scope}'.",
 		)
+		self._require(
+			self.remove_count < eligible_count,
+			f"remove_count ({self.remove_count:,}) must be smaller than eligible Kaggle tie rows ({eligible_count:,}).",
+		)
+		if self.remove_count > 0:
+			rng = np.random.default_rng(self.sample_seed)
+			keep_count = eligible_count - self.remove_count
+			keep_positions = np.sort(
+				rng.choice(eligible_count, size=keep_count, replace=False)
+			)
+			sources = sources.iloc[keep_positions].copy()
 		self._require(
 			bool(
 				sources["winner_model_a"].eq(0).all()
@@ -186,6 +221,10 @@ class KaggleTieDuplicateGenerator:
 			},
 			tie_share_before=str(before_share),
 			tie_pct_before=float(before_share * 100),
+			total_kaggle_tie_rows=len(kaggle_ties),
+			excluded_identical_ab_rows=excluded_identical_ab_rows,
+			eligible_kaggle_tie_rows=eligible_count,
+			removed_random_rows=self.remove_count,
 			added_rows=count,
 			new_ids={"first": start, "last": start + count - 1},
 			source_splits=dict(Counter(supplement["source_split"])),
@@ -208,6 +247,10 @@ class KaggleTieDuplicateGenerator:
 			"source_dataset": self.SOURCE_DATASET,
 			"source_label": self.SOURCE_LABEL,
 			"repeat": self.REPEAT,
+			"exclude_identical_ab": self.EXCLUDE_IDENTICAL_AB,
+			"eligible_count": self.report["eligible_kaggle_tie_rows"],
+			"remove_count": self.remove_count,
+			"sample_seed": self.sample_seed,
 			"target_count": len(supplement),
 			"algorithm_version": self.ALGORITHM_VERSION,
 		}
@@ -252,7 +295,7 @@ class KaggleTieDuplicateGenerator:
 			"original_file_values_order_and_partitions_unchanged": True,
 			"supplement_roundtrip_values_order_dtypes_preserved": True,
 			"unique_ids_without_original_collisions": True,
-			"exact_kaggle_tie_coverage_once": True,
+			"exact_non_identical_ab_kaggle_tie_coverage_once": True,
 			"original_orientation_ties_only": True,
 			"scope_source_membership_and_validation_isolation": True,
 		}

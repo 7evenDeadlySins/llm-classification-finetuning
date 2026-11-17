@@ -11,7 +11,7 @@
 **数据混合与类别比例**：清洗、去重并完成验证集隔离后，全部真实样本合并训练，按行等权；不按来源额外加权或重采样，也不采用按来源划分的两阶段训练。Kaggle 的重复对局保留优先级仅用于去重，不赋予其更高训练权重。
 
 * **真实数据保留自然比例，训练时补齐 tie**：真实合并表保留全部自然类别比例；训练时追加独立自回复平局，使 tie 比例最接近 Kaggle 的 `17788/57477`（约 `30.9480%`）。不额外设置类别权重或重采样，全部真实及合成训练行等权。
-* **暂时移出合成平局并重复 Kaggle 训练集平局（2026-11-18）**：各预设当前停用合成自回复平局补集并已移除本地旧补集文件；`data.build_supplement_path` 保持 `null`，`data.train_supplement_path` 指向 `data/kaggle_tie_duplicate/external_merged/train/kaggle_tie_duplicates.parquet`（将训练集中 14,230 条 Kaggle 平局样本重复一遍，训练集由 208,997 行增至 223,227 行，平局占比 `73840 / 223227 ≈ 33.0784%`，验证集保持 11,495 条不变，详见[生成规则](data-preparation.md#kaggle-tie-duplication)）。保留以下合成规则与生成器供后续恢复：在暂时移出 HelpSteer3 并排除模型上下文超限样本的 220,492 行真实表上，train 补集为 7,343 条（占补充后训练数据 3.3942%），build 补集为 7,342 条（占补充后数据 3.2225%），两份补充集互斥加载且历史胜率均值均须精确为 `1/2`；验证集不追加合成行。详见[生成规则](data-preparation.md#scope-specific-synthetic-ties)。
+* **暂时移出合成平局并重复 Kaggle 训练集平局（2026-11-18）**：各预设当前停用合成自回复平局补集并已移除本地旧补集文件；`data.build_supplement_path` 保持 `null`，`data.train_supplement_path` 指向 `data/kaggle_tie_duplicate/external_merged/train/kaggle_tie_duplicates.parquet`（将训练集中 `14,230` 条 Kaggle 平局样本排除 `233` 条 A/B 回复完全相同样本后的 `13,997` 条中，按随机种子 `42` 随机移除 `6,654` 条，保留 `7,343` 条重复一遍，训练集由 208,997 行增至 216,340 行，平局占比 `66953 / 216340 ≈ 30.9480%`，验证集保持 11,495 条不变，详见[生成规则](data-preparation.md#kaggle-tie-duplication)）。保留以下合成规则与生成器供后续恢复：在暂时移出 HelpSteer3 并排除模型上下文超限样本的 220,492 行真实表上，train 补集为 7,343 条（占补充后训练数据 3.3942%），build 补集为 7,342 条（占补充后数据 3.2225%），两份补充集互斥加载且历史胜率均值均须精确为 `1/2`；验证集不追加合成行。详见[生成规则](data-preparation.md#scope-specific-synthetic-ties)。
 
 合成时保留原有初选与全胜替换；若历史分数中的 `1/3` 等比例使最后一次半胜替换不可行，允许用一次或两次同 prompt 的精确分数替换完成调整。优先使用更少的替换，再比较总 token 长度变化和原有候选顺序；先执行降低分数的步骤，始终保留初始 prompt 覆盖与补充条数，最终均值仍须精确为 `1/2`。
 

@@ -45,9 +45,11 @@ original A/B orientations only. Current presets use the
 [merged real preference dataset](docs/data-preparation.md#merged-external-preferences)
 with hard labels and a frozen Kaggle holdout (**208,997** real training rows;
 **220,492** real build rows). Synthetic self-response tie supplements remain
-excluded, and validation/warmup training currently duplicates the **14,230**
-Kaggle training tie rows once via `train_supplement_path` (**223,227** effective
-training rows), while `build_supplement_path` remains `null` and the 11,495 real
+excluded, and validation/warmup training currently duplicates **7,343** of the
+**13,997** distinct-response Kaggle training tie rows once via
+`train_supplement_path` (excluding **233** identical-A/B Kaggle training ties
+and randomly removing **6,654** duplicate rows; **216,340** effective training
+rows), while `build_supplement_path` remains `null` and the 11,495 real
 validation rows remain unchanged.
 See [Kaggle tie duplicates](docs/data-preparation.md#kaggle-tie-duplication) and
 [synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties). `ALL`

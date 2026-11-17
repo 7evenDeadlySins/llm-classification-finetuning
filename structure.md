@@ -137,7 +137,7 @@ Package `__init__.py` files expose intended public interfaces unless noted.
 | `preprocess/deduplication.py` | `ExternalBattleDeduplicator`: complete-prompt/unordered-pair identities, validation exclusion, optional independent hard-vote merging, conflicting-vote diagnostics and representative/status/count audits |
 | `preprocess/splits.py` | Exact-response tie correction before labels/prompt hashes, grouped class quotas, balance orchestration, original-only integrity summaries, and processed publication |
 | `preprocess/synthetic_tie.py` | Deterministic train/build self-response tie generation with dynamic counts, exact rational win-rate adjustment, full source/selection/replacement audits with bounded-volume streaming, and staged publication; invoked by `data/generate_synthetic_tie.py` |
-| `preprocess/kaggle_tie_duplicate.py` | Deterministic train/build Kaggle tie row duplication (`repeat=1`), schema/provenance metadata, roundtrip checks, and staged publication; invoked by `data/generate_kaggle_tie_duplicate.py` |
+| `preprocess/kaggle_tie_duplicate.py` | Deterministic train/build distinct-response Kaggle tie row duplication (`repeat=1`, excluding `response_a == response_b`, deterministic random removal of `remove_count` rows), schema/provenance metadata, roundtrip checks, and staged publication; invoked by `data/generate_kaggle_tie_duplicate.py` |
 | `preprocess/token_balance.py` | Canonical token counting and deterministic equal-class whole-group exchanges |
 
 ### Profile registration and warmup

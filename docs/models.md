@@ -123,8 +123,10 @@ HelpSteer3 temporarily excluded (208,997 real training rows; 11,495 frozen
 validation rows). For holdout validation and standalone warmup, current presets
 set `data.train_supplement_path` to the
 [Kaggle tie duplicate supplement](data-preparation.md#kaggle-tie-duplication),
-appending 14,230 duplicated Kaggle training tie rows (223,227 effective training
-rows) while holdout evaluation retains only its 11,495 real rows.
+appending 7,343 duplicated distinct-response Kaggle training tie rows
+(excluding 233 identical-A/B Kaggle training ties and randomly removing 6,654
+of the 13,997 duplicates; 216,340 effective training rows) while holdout
+evaluation retains only its 11,495 real rows.
 Build directly from the prepared dataset:
 
 ```shell

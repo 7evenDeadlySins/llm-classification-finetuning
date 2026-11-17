@@ -268,11 +268,12 @@ the newly published real table.
 
 ## Kaggle tie duplication
 
-To reinforce real Kaggle tie examples during holdout validation and standalone
-warmup without modifying the audited real-data table or touching the frozen
-validation set, `data/generate_kaggle_tie_duplicate.py` generates an independent
-supplement containing one duplicate of each eligible Kaggle tie row (`label=2`,
-`is_swapped=False`) with fresh unique `id`s starting after the maximum real ID:
+To reinforce real distinct-response Kaggle tie examples during holdout validation
+and standalone warmup without modifying the audited real-data table or touching
+the frozen validation set, `data/generate_kaggle_tie_duplicate.py` generates an
+independent supplement containing one duplicate of each eligible Kaggle tie row
+(`label=2`, `is_swapped=False`, `response_a != response_b`) with fresh unique
+`id`s starting after the maximum real ID:
 
 ```powershell
 uv run python data/generate_kaggle_tie_duplicate.py --config config.yaml --scope all
@@ -283,14 +284,17 @@ Current presets set `data.train_supplement_path` to
 `data/kaggle_tie_duplicate/external_merged/train/kaggle_tie_duplicates.parquet`
 and leave `data.build_supplement_path: null`:
 
-- `train` scope duplicates all **14,230** Kaggle `split="train"` tie rows once,
-  increasing holdout/warmup training rows from **208,997** (59,610 ties, 28.52%)
-  to **223,227** (73,840 ties, 33.08%) while keeping the 11,495 validation rows
-  untouched.
+- `train` scope selects from the **13,997** distinct-response Kaggle
+  `split="train"` tie rows (excluding **233** identical-A/B Kaggle training tie
+  rows out of 14,230 total) and deterministically removes **6,654** random
+  duplicate rows (`validation.random_state: 42`), retaining **7,343**
+  duplicated rows and increasing holdout/warmup training rows from **208,997**
+  (59,610 ties, 28.52%) to **216,340** (66,953 ties, 30.95%) while keeping the
+  11,495 validation rows untouched.
 - `BuildSupplementLoader` validates schema metadata
-  (`llm_classification_finetuning.row_duplicate`), `source_sha256`, exact
-  `source_original_id` coverage, validation-prompt isolation, and field parity
-  with the real dataset.
+  (`llm_classification_finetuning.row_duplicate`), `source_sha256`,
+  `remove_count`, `source_original_id` subset membership, validation-prompt
+  isolation, and field parity with the real dataset.
 
 ## Scope-specific synthetic ties
 

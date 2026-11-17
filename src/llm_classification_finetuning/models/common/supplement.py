@@ -170,16 +170,32 @@ class BuildSupplementLoader:
 			identity.get("source_dataset") != "kaggle"
 			or identity.get("source_label") != 2
 			or identity.get("repeat") != 1
+			or identity.get("exclude_identical_ab") is not True
 		):
 			raise ValueError("duplicate supplement provenance metadata is inconsistent")
 		expected = self._duplicate_sources(original.data, self.scope)
-		if identity.get("target_count") != len(expected):
-			raise ValueError(f"supplement target count must be {len(expected):,}")
-		self.validate_duplicate(data, original.data, scope=self.scope)
+		remove_count = identity.get("remove_count", 0)
+		if (
+			isinstance(remove_count, bool)
+			or not isinstance(remove_count, int)
+			or not 0 <= remove_count < len(expected)
+		):
+			raise ValueError("duplicate supplement remove_count is invalid")
+		if "eligible_count" in identity and identity["eligible_count"] != len(expected):
+			raise ValueError(f"supplement eligible count must be {len(expected):,}")
+		expected_count = len(expected) - remove_count
+		if identity.get("target_count") != expected_count:
+			raise ValueError(f"supplement target count must be {expected_count:,}")
+		self.validate_duplicate(
+			data,
+			original.data,
+			scope=self.scope,
+			expected_count=expected_count,
+		)
 
 	@staticmethod
 	def _duplicate_sources(original: pd.DataFrame, scope: str) -> pd.DataFrame:
-		"""Select eligible Kaggle tie rows from the target scope."""
+		"""Select eligible non-identical-A/B Kaggle tie rows from the target scope."""
 		if scope not in {"train", "build"}:
 			raise ValueError("Supplement scope must be 'train' or 'build'.")
 		base = (
@@ -192,14 +208,21 @@ class BuildSupplementLoader:
 			if "source" in base.columns
 			else base["id"].lt(1 << 32)
 		)
-		sources = base.loc[kaggle & base["label"].eq(2)]
+		sources = base.loc[
+			kaggle & base["label"].eq(2) & base["response_a"].ne(base["response_b"])
+		]
 		if sources.empty:
-			raise ValueError("Supplement scope has no Kaggle tie rows.")
+			raise ValueError("Supplement scope has no eligible Kaggle tie rows.")
 		return sources
 
 	@classmethod
 	def validate_duplicate(
-		cls, data: pd.DataFrame, original: pd.DataFrame, *, scope: str = "build"
+		cls,
+		data: pd.DataFrame,
+		original: pd.DataFrame,
+		*,
+		scope: str = "build",
+		expected_count: int | None = None,
 	) -> None:
 		"""Check exact Kaggle tie duplicate count, IDs, labels, and source rows."""
 		required = [
@@ -212,8 +235,15 @@ class BuildSupplementLoader:
 			"winner_tie",
 		]
 		expected = cls._duplicate_sources(original, scope)
-		if len(data) != len(expected) or data.loc[:, required].isna().any().any():
-			raise ValueError(f"supplement must contain {len(expected):,} complete rows")
+		target_count = len(expected) if expected_count is None else expected_count
+		if (
+			isinstance(target_count, bool)
+			or not isinstance(target_count, int)
+			or not 0 < target_count <= len(expected)
+		):
+			raise ValueError("duplicate supplement expected_count is invalid")
+		if len(data) != target_count or data.loc[:, required].isna().any().any():
+			raise ValueError(f"supplement must contain {target_count:,} complete rows")
 		for name in (
 			"id",
 			"source_original_id",
@@ -237,13 +267,21 @@ class BuildSupplementLoader:
 			and data.winner_model_b.eq(0).all()
 			and data.winner_tie.eq(1).all()
 			and data.source_dataset.eq("kaggle").all()
+			and data.response_a.ne(data.response_b).all()
 		):
-			raise ValueError(f"supplement must contain {scope} Kaggle tie duplicates")
-		if data.source_original_id.duplicated().any() or set(
-			data.source_original_id.astype("int64")
-		) != set(expected.id.astype("int64")):
 			raise ValueError(
-				"supplement source_original_id values must match eligible Kaggle ties once each"
+				f"supplement must contain {scope} non-identical-A/B Kaggle tie duplicates"
+			)
+		source_ids = set(data.source_original_id.astype("int64"))
+		expected_ids = set(expected.id.astype("int64"))
+		valid_source_ids = (
+			source_ids == expected_ids
+			if target_count == len(expected)
+			else source_ids.issubset(expected_ids)
+		)
+		if data.source_original_id.duplicated().any() or not valid_source_ids:
+			raise ValueError(
+				"supplement source_original_id values must come from unique eligible Kaggle ties"
 			)
 		if scope == "train":
 			validation = original.loc[original.split.eq("validation")]

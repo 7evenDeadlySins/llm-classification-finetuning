@@ -15,6 +15,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
 	parser = argparse.ArgumentParser(description=__doc__)
 	add_config_argument(parser)
 	parser.add_argument("--scope", choices=("train", "build", "all"), default="all")
+	parser.add_argument(
+		"--remove-count",
+		type=int,
+		default=KaggleTieDuplicateGenerator.DEFAULT_REMOVE_COUNT,
+	)
 	parsed_arguments = parser.parse_args(arguments)
 	try:
 		config = AppConfig.load(parsed_arguments.config)
@@ -35,7 +40,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
 				"Configure the requested data.train_supplement_path or data.build_supplement_path."
 			)
 		for scope in enabled:
-			output = KaggleTieDuplicateGenerator(config, scope=scope).run()
+			output = KaggleTieDuplicateGenerator(
+				config,
+				scope=scope,
+				remove_count=parsed_arguments.remove_count,
+			).run()
 			print(f"Generation summary ({scope}): {output / 'summary.json'}")
 		return 0
 	except (DataPreparationError, OSError) as error:
