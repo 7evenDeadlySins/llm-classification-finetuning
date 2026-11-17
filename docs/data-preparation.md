@@ -103,7 +103,8 @@ with HelpSteer3 preference temporarily excluded on 2026-11-17. Data is construct
 [adopted processing rules](recommended-external-data.md#已确定的处理原则).
 All targets are hard labels with integer one-hot winner fields. Rows have equal
 training weight. The saved real-data table retains its natural class proportions;
-model training appends the [scope-specific synthetic ties](#scope-specific-synthetic-ties).
+current presets temporarily disable [scope-specific synthetic ties](#scope-specific-synthetic-ties)
+(`train_supplement_path: null`, `build_supplement_path: null`).
 
 The standard merger rebuilds the full pinned source set, including HelpSteer3:
 
@@ -265,10 +266,13 @@ the newly published real table.
 
 ## Scope-specific synthetic ties
 
-The real-data merger preserves natural labels and counts. Current presets append
-independent self-response ties during training to match the corrected Kaggle-only
-ratio `17788/57477` (30.9480313865%) as closely as an integer addition permits.
-This restores the old synthesis rules for the merged real dataset.
+The real-data merger preserves natural labels and counts. Current presets
+temporarily exclude synthetic ties (`data.train_supplement_path: null` and
+`data.build_supplement_path: null`), and the local supplement files under
+`data/synthetic_tie/external_merged/context40960/` were removed. When enabled,
+training appends independent self-response ties to match the corrected
+Kaggle-only ratio `17788/57477` (30.9480313865%) as closely as an integer
+addition permits.
 
 ```powershell
 uv run python data/generate_synthetic_tie.py --config config.yaml --scope all
@@ -277,8 +281,9 @@ uv run python data/generate_synthetic_tie.py --config config.yaml --scope all
 `--scope train|build|all` defaults to `all`, generating every configured scope.
 An explicit scope requires its corresponding path. The optional
 `data.train_supplement_path` and `data.build_supplement_path` default to `null`.
-Current presets use `data/synthetic_tie/external_merged/context40960/train/synthetic_ties.parquet`
-and `data/synthetic_tie/external_merged/context40960/build/synthetic_ties.parquet` respectively.
+When enabled, presets point to `data/synthetic_tie/external_merged/context40960/train/synthetic_ties.parquet`
+and `data/synthetic_tie/external_merged/context40960/build/synthetic_ties.parquet` respectively;
+both are currently `null`.
 They are regenerated against the filtered real-data fingerprint and statistics.
 They live in separate directories so staged publication cannot replace the other scope.
 Staging directories inherit project permissions on Windows, preventing private
@@ -349,7 +354,7 @@ Missing, corrupt, wrong-scope or source-mismatched configured supplements fail l
 
 ### Historical LMSYS33K supplement
 
-The original build-only artifact remains at `data/synthetic_tie/lmsys33k/`.
+The original build-only artifact lived at `data/synthetic_tie/lmsys33k/` (removed locally during the 2026-11-18 cleanup).
 It has 1,012 ties for the 77,527-row snapshot, an exact score sum of `506`,
 and a final tie share of `24306/78539` (30.9476820433%). Its schema v1 remains
 loadable for its matching historical build, but cannot supply current train or

@@ -1,13 +1,13 @@
-# Consume merged real preferences and scope-specific synthetic ties with the frozen Kaggle holdout.
-# HelpSteer3 preference is temporarily excluded; rebuild procedure: docs/data-preparation.md.
+# Consume merged real preferences with the frozen Kaggle holdout.
+# HelpSteer3 preference and synthetic ties are temporarily excluded; rebuild procedure: docs/data-preparation.md.
 # Counts, source revisions and checksums: data/processed/external_merged/summary.json
 
 data:
   competition: llm-classification-finetuning
   raw_dir: data/raw
   processed_path: data/processed/external_merged/train_validation.parquet
-  train_supplement_path: data/synthetic_tie/external_merged/context40960/train/synthetic_ties.parquet
-  build_supplement_path: data/synthetic_tie/external_merged/context40960/build/synthetic_ties.parquet
+  train_supplement_path: null
+  build_supplement_path: null
 
 validation:
   validation_fraction: 0.05213341073599042

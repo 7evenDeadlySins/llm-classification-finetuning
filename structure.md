@@ -46,10 +46,10 @@ flowchart TD
 The saved split included in Git can enter this flow without downloading raw data.
 Standalone warmup is optional; inline LoRA runs create/reuse their compatible
 warmup state. Validation does not save production checkpoints. Builds use IDs
-from both partitions. Current presets consume merged real data with hard labels
-and append scope-specific synthetic ties: validation and standalone warmup use
-the train supplement, while builds use only the build supplement. The frozen
-validation rows remain real-only.
+from both partitions. Current presets consume merged real data with hard labels and
+temporarily disable both synthetic tie supplements (`null`); when enabled,
+validation and standalone warmup use the train supplement while builds use only
+the build supplement. The frozen validation rows remain real-only.
 Frozen SR2 saves only its independent head; LoRA builds
 also export the merged backbone with its tokenizer.
 
@@ -231,8 +231,8 @@ defaults to `./results` and controls validation, report, and log roots.
 | `data/processed/train_validation.parquet` | Logical saved split; single file or manifest plus volumes |
 | `data/processed/lmsys33k/` | Historical Kaggle + LMSYS snapshot, also the frozen Kaggle baseline for the merger |
 | `data/processed/external_merged/` | Current merged real-only hard-label data, frozen validation IDs, conversion/vote/token audits and checksums |
-| `data/synthetic_tie/external_merged/context40960/train/`, `build/` | Mutually exclusive train/build synthetic ties and summary audits for the context-filtered real data |
-| `data/synthetic_tie/lmsys33k/` | Historical build supplement and audits; disabled in current presets |
+| `data/synthetic_tie/external_merged/context40960/train/`, `build/` | Scope-specific train/build synthetic tie target paths (currently `null` in presets and removed locally) |
+| `data/synthetic_tie/lmsys33k/` | Historical build supplement path (deleted locally; disabled in current presets) |
 | `<CACHE_PATH>/token_cache/`, `embedding_cache/`, `adapter_batches/plans/` | Shared token, frozen/warmup-feature, and LoRA base-plan stores |
 | `<CACHE_PATH>/SR2_Qwen3_4B_lora_warmup/` | Completed Skywork head state, shared by frozen SR2, LoRA SR2, and standalone warmup |
 | `models/SR2_Qwen3_4B/head[_TAG].pt` | Independent frozen SR2 head and encoding/training metadata |

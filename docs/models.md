@@ -108,12 +108,13 @@ uv run model SR2-Qwen3-4B-lora --build --checkpoint-tag experiment
 ```
 
 Both active model builds append `data.build_supplement_path` when configured.
-Current presets use separate [synthetic tie supplements](data-preparation.md#scope-specific-synthetic-ties)
-for the context-filtered merged real preference dataset with HelpSteer3 temporarily
-excluded: 7,342 build additions, or 7,343 train
-additions via `data.train_supplement_path` for validation training and standalone
-warmup. Each mode loads one supplement; holdout evaluation retains only its
-11,495 frozen real rows.
+Current presets temporarily set both `data.train_supplement_path` and
+`data.build_supplement_path` to `null` (excluding [synthetic tie supplements](data-preparation.md#scope-specific-synthetic-ties))
+and use the 220,492-row context-filtered merged real preference dataset with
+HelpSteer3 temporarily excluded (208,997 real training rows; 11,495 frozen
+validation rows). When supplements are enabled, each mode loads one supplement
+(7,342 build additions, or 7,343 train additions for validation training and
+standalone warmup) while holdout evaluation retains only its 11,495 real rows.
 Build directly from the prepared dataset:
 
 ```shell

@@ -42,13 +42,11 @@ Selectors and YAML section names are case-sensitive.
 Both profiles consume the saved train/validation split and train and predict on
 original A/B orientations only. Current presets use the
 [merged real preference dataset](docs/data-preparation.md#merged-external-preferences)
-with hard labels and a frozen Kaggle holdout. Separate self-response tie
-supplements bring the training tie share closest to Kaggle's **30.9480%**:
-**7,343** additions for validation training and standalone warmup (**216,340**
-training rows; **3.3942%** synthetic), or **7,342** for full-data builds
-(**227,834** rows; **3.2225%** synthetic).
-The 11,495 real validation rows remain unchanged. See
-[synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties). `ALL`
+with hard labels and a frozen Kaggle holdout (**208,997** real training rows;
+**220,492** real build rows). Synthetic self-response tie supplements are
+temporarily excluded (`train_supplement_path: null`,
+`build_supplement_path: null`); the 11,495 real validation rows remain unchanged.
+See [synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties). `ALL`
 runs configured frozen SR2 before LoRA.
 Both profiles pool the last real token of each branch before the comparison
 head. LoRA joint training and validation use the same pooling as frozen SR2
