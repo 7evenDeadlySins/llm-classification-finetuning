@@ -27,8 +27,9 @@ context, without truncation. Model and warmup limits are **40,960 tokens**;
 the longest retained branch has **40,953 tokens**. Rebuild and
 audit instructions are in [data preparation](docs/data-preparation.md#merged-external-preferences).
 Data preparation tools live in [data/](data/), including
-[the external-data merger](data/merge_external_data.py) and
-[the synthetic tie generator](data/generate_synthetic_tie.py).
+[the external-data merger](data/merge_external_data.py),
+[the synthetic tie generator](data/generate_synthetic_tie.py), and
+[the Kaggle tie duplicate generator](data/generate_kaggle_tie_duplicate.py).
 
 ## Model profiles
 
@@ -43,10 +44,13 @@ Both profiles consume the saved train/validation split and train and predict on
 original A/B orientations only. Current presets use the
 [merged real preference dataset](docs/data-preparation.md#merged-external-preferences)
 with hard labels and a frozen Kaggle holdout (**208,997** real training rows;
-**220,492** real build rows). Synthetic self-response tie supplements are
-temporarily excluded (`train_supplement_path: null`,
-`build_supplement_path: null`); the 11,495 real validation rows remain unchanged.
-See [synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties). `ALL`
+**220,492** real build rows). Synthetic self-response tie supplements remain
+excluded, and validation/warmup training currently duplicates the **14,230**
+Kaggle training tie rows once via `train_supplement_path` (**223,227** effective
+training rows), while `build_supplement_path` remains `null` and the 11,495 real
+validation rows remain unchanged.
+See [Kaggle tie duplicates](docs/data-preparation.md#kaggle-tie-duplication) and
+[synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties). `ALL`
 runs configured frozen SR2 before LoRA.
 Both profiles pool the last real token of each branch before the comparison
 head. LoRA joint training and validation use the same pooling as frozen SR2

@@ -21,6 +21,7 @@ models--*.zip
 
 # Downloaded and generated competition data, except preparation tools and the saved split
 /data/*
+!/data/generate_kaggle_tie_duplicate.py
 !/data/generate_synthetic_tie.py
 !/data/merge_external_data.py
 !/data/processed/

@@ -103,8 +103,10 @@ with HelpSteer3 preference temporarily excluded on 2026-11-17. Data is construct
 [adopted processing rules](recommended-external-data.md#已确定的处理原则).
 All targets are hard labels with integer one-hot winner fields. Rows have equal
 training weight. The saved real-data table retains its natural class proportions;
-current presets temporarily disable [scope-specific synthetic ties](#scope-specific-synthetic-ties)
-(`train_supplement_path: null`, `build_supplement_path: null`).
+current presets temporarily disable [scope-specific synthetic ties](#scope-specific-synthetic-ties),
+and enable [Kaggle tie duplication](#kaggle-tie-duplication) for validation
+training and standalone warmup (`train_supplement_path: data/kaggle_tie_duplicate/external_merged/train/kaggle_tie_duplicates.parquet`,
+`build_supplement_path: null`).
 
 The standard merger rebuilds the full pinned source set, including HelpSteer3:
 
@@ -264,12 +266,40 @@ After any real-data rebuild, update `validation.validation_fraction` in
 both supplements with the command below. Their source fingerprints must match
 the newly published real table.
 
+## Kaggle tie duplication
+
+To reinforce real Kaggle tie examples during holdout validation and standalone
+warmup without modifying the audited real-data table or touching the frozen
+validation set, `data/generate_kaggle_tie_duplicate.py` generates an independent
+supplement containing one duplicate of each eligible Kaggle tie row (`label=2`,
+`is_swapped=False`) with fresh unique `id`s starting after the maximum real ID:
+
+```powershell
+uv run python data/generate_kaggle_tie_duplicate.py --config config.yaml --scope all
+```
+
+`--scope train|build|all` defaults to `all`, generating every configured scope.
+Current presets set `data.train_supplement_path` to
+`data/kaggle_tie_duplicate/external_merged/train/kaggle_tie_duplicates.parquet`
+and leave `data.build_supplement_path: null`:
+
+- `train` scope duplicates all **14,230** Kaggle `split="train"` tie rows once,
+  increasing holdout/warmup training rows from **208,997** (59,610 ties, 28.52%)
+  to **223,227** (73,840 ties, 33.08%) while keeping the 11,495 validation rows
+  untouched.
+- `BuildSupplementLoader` validates schema metadata
+  (`llm_classification_finetuning.row_duplicate`), `source_sha256`, exact
+  `source_original_id` coverage, validation-prompt isolation, and field parity
+  with the real dataset.
+
 ## Scope-specific synthetic ties
 
 The real-data merger preserves natural labels and counts. Current presets
-temporarily exclude synthetic ties (`data.train_supplement_path: null` and
-`data.build_supplement_path: null`), and the local supplement files under
-`data/synthetic_tie/external_merged/context40960/` were removed. When enabled,
+temporarily exclude synthetic ties (`data.build_supplement_path: null`;
+`data.train_supplement_path` is currently used for
+[Kaggle tie duplication](#kaggle-tie-duplication) instead), and the local
+synthetic-tie files under `data/synthetic_tie/external_merged/context40960/` were
+removed. When enabled,
 training appends independent self-response ties to match the corrected
 Kaggle-only ratio `17788/57477` (30.9480313865%) as closely as an integer
 addition permits.
