@@ -163,29 +163,22 @@ presets set `validation.validation_fraction` to `11495 / total_rows` and configu
 the two independent supplement paths described below. Use this dedicated merger to rebuild the
 combined dataset; `init` and `preprocess` rebuild a Kaggle-only split.
 
-The 2026-11-18 build (with HelpSteer3, 4,387 non-tie rows among the 6,549
-restored redundant multi-turn prefix rows, and the 11,995 shortest external
-non-tie rows temporarily excluded) contains 204,110 rows: 192,615 train and the
-frozen 11,495 validation rows (tie share `63168 / 204110`, 30.9480%). Its
-full-table validation fraction is `0.05631767184361374`. The short non-tie
-exclusion ranks external `label != 2` battles by single-prompt + both-branch
-template tokens (`tokens_a + tokens_b - user_prompt_chat_template_tokens`,
-28–307 tokens; tie-broken at 307 tokens across 54 candidates by lowest prompt
-group frequency in the 216,105-row table, fewest user-prompt template tokens,
-then ID, taking 45 of 54). It preserves all 57,477 Kaggle rows and all 2,162
-ties among the 6,549 prefix rows, excludes 102 over-context training battles (78
-Arena human and 24 Arena expert), and retains 1,519 rows above the old token
-ceiling. The maximum retained complete branch is 40,953 tokens; the maximum A+B
-total is 78,827, below the current 147,456-token joint training budget. The
-unmodified 220,492-row real table (without HelpSteer3) is preserved in a sibling
-`external_merged.backup-220492-*` directory.
+The 2026-11-17 context-filtered build without HelpSteer3 contains 220,492 rows: 208,997 train and
+the frozen 11,495 validation rows (tie share `63168 / 220492`, 28.6487%; train tie share `59610 / 208997`, 28.5219%). Its full-table validation fraction is
+`0.05213341073599042`. It excludes 102 over-context training battles (78 Arena
+human and 24 Arena expert) and retains 1,584 rows above the old token ceiling.
+The maximum retained complete branch is 40,953 tokens; the maximum A+B total
+is 78,827, below the current 147,456-token joint training budget. All Kaggle
+rows and validation IDs are unchanged. The previous real-data snapshot with
+HelpSteer3 is preserved in a sibling `external_merged.backup-with-helpsteer3-*`
+directory. The two superseded supplements were removed before regeneration.
 
 | Representative source | Train rows | Validation rows |
 | --- | ---: | ---: |
 | Kaggle | 45,982 | 11,495 |
-| LMSYS | 18,399 | 0 |
-| Arena human | 124,937 | 0 |
-| Arena expert | 3,297 | 0 |
+| LMSYS | 24,227 | 0 |
+| Arena human | 135,440 | 0 |
+| Arena expert | 3,348 | 0 |
 | HelpSteer3 preference (temporarily excluded) | 0 | 0 |
 
 Source counts identify retained representatives; cross-source votes remain in
@@ -229,9 +222,7 @@ unique highest-count class becomes the final hard label. Highest-count ties
 are excluded, while successful groups retain the smallest-ID representative's
 content and orientation. Conflicting copies of one vote stop publication.
 Statuses include `retained`, `merged_vote`, `duplicate_vote`, `duplicate_training`,
-`excluded_validation_prompt`, `excluded_vote_tie`, `excluded_model_context`,
-`excluded_restored_prefix_non_tie` (for the temporary exclusion of non-ties among restored prefix rows), and
-`excluded_short_external_non_tie` (for the temporary exclusion of the 11,995 shortest external non-ties).
+`excluded_validation_prompt`, `excluded_vote_tie`, and `excluded_model_context`.
 Token statistics retain every candidate with `retained` and
 `exceeds_model_context` flags. Length filtering follows voting, preserving
 retained vote outcomes; `dedup_status` records the original deduplication status.
