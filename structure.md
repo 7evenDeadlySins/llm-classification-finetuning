@@ -159,13 +159,12 @@ share endpoint-based exponential decay from the initial rate to `build_min_lr`
 over `build_epochs`. Decaying head states use a versioned schedule identity;
 fixed-rate cache identities remain compatible.
 Retired profiles remain unregistered and
-their configuration sections are rejected; local ignored
-archives are outside active imports. See [migration](docs/migration.md#retired-profiles).
+their configuration sections are rejected. See
+[migration](docs/migration.md#retired-profiles).
 
-### Shared and frozen-model infrastructure
+### Shared infrastructure
 
 Paths in this table are under `models/common/`.
-Legacy frozen-model modules remain as retained infrastructure and shared dependencies.
 The active frozen SR2 profile uses the adapter-free path in the SR2 LoRA package,
 with the current SR2 head and warmup feature identities, rather than legacy MLP training.
 
@@ -177,20 +176,16 @@ with the current SR2 head and warmup feature identities, rather than legacy MLP 
 | `data.py` | Tokenizer-injected official chat-template serialization and pairwise training repository |
 | `hardware.py` | CUDA/precision validation, single-GPU placement, isolated phase intervals with cross-epoch allocator maxima, and reset-safe global peaks |
 | `backbone.py` | Local weight/configuration content fingerprints for caches |
-| `compatibility.py` | Frozen embedding and head-checkpoint compatibility construction |
 | `cache_storage.py` | Locked file sessions, atomic/multipart publication with destination-directory permission inheritance on Windows, checksums, corruption archives, non-destructive component/size checks, and staged missing-component copies preserving authoritative manifests |
 | `token_cache.py` | Content-addressed text encodings, compact CPU views, canonical pair tokens, context validation, and exact length-only caching for large external-data preparation |
 | `cache.py` | Per-branch SQLite frozen/warmup embeddings, lossless FP16/BF16/FP32 storage, and rebinding to current rows |
 | `extraction_batching.py` | Deterministic branch extraction plans comparing contiguous DP with best-fit by batch count, then padded tokens; stable length/iteration behavior |
-| `extractor.py` | CPU identity preparation and lazy GPU encoding of missing frozen branches |
-| `model.py` | Frozen backbone, last-real-token pooling, and `3H` pairwise MLP |
+| `model.py` | Shared base `PairwiseClassificationHead` definition and legacy frozen backbone wrapper |
 | `orientation.py` | A/B probability averaging and validation-row alignment |
 | `loss.py` | Label smoothing on logits or averaged log probabilities; training reductions |
-| `trainer.py` | Legacy holdout/full-data frozen-head training, shared epoch/final cached-head evaluation summaries, and optional training/validation memory intervals |
-| `checkpoint.py` | Atomic legacy frozen head persistence and compatibility metadata |
+| `trainer.py` | Shared epoch/final evaluation metric contracts (`EpochMetrics`, `FinalEvaluationMetrics`, `ValidationTrainingResult`) and retained legacy head-training helpers |
 | `progress.py` | CPU work counters, independent stage timers/completion, configurable percentage or timed updates, and optional silent completion for combined epoch summaries, retaining legacy weighted counters |
 | `publishers.py` | Staged validation publication, effective YAML snapshots, and successful-run timing/peak updates |
-| `pipeline.py` | Frozen validation/build orchestration |
 
 ### SR2 LoRA implementation
 
@@ -227,7 +222,6 @@ defaults to `./results` and controls validation, report, and log roots.
 | Path | Role |
 | --- | --- |
 | `config.yaml`, `configs/*.yaml` | Independent complete current presets |
-| `config_archive/` | Historical configurations; not current defaults |
 | `.env.example` | Kaggle token, model/training-cache/result paths, and offline HF execution template |
 | `pyproject.toml`, `uv.lock`, `.python-version` | Package/entry points, training dependencies, and Python version |
 | `data/merge_external_data.py`, `data/generate_synthetic_tie.py` | Standalone entry points for real-data merging and optional synthetic tie generation |
@@ -237,7 +231,7 @@ defaults to `./results` and controls validation, report, and log roots.
 | `data/processed/train_validation.parquet` | Logical saved split; single file or manifest plus volumes |
 | `data/processed/lmsys33k/` | Historical Kaggle + LMSYS snapshot, also the frozen Kaggle baseline for the merger |
 | `data/processed/external_merged/` | Current merged real-only hard-label data, frozen validation IDs, conversion/vote/token audits and checksums |
-| `data/synthetic_tie/external_merged/context40960/train/`, `build/` | Mutually exclusive train/build synthetic ties and generation audits for the context-filtered real data |
+| `data/synthetic_tie/external_merged/context40960/train/`, `build/` | Mutually exclusive train/build synthetic ties and summary audits for the context-filtered real data |
 | `data/synthetic_tie/lmsys33k/` | Historical build supplement and audits; disabled in current presets |
 | `<CACHE_PATH>/token_cache/`, `embedding_cache/`, `adapter_batches/plans/` | Shared token, frozen/warmup-feature, and LoRA base-plan stores |
 | `<CACHE_PATH>/SR2_Qwen3_4B_lora_warmup/` | Completed Skywork head state, shared by frozen SR2, LoRA SR2, and standalone warmup |
@@ -252,12 +246,8 @@ defaults to `./results` and controls validation, report, and log roots.
 
 Runtime artifact directories are not source modules. The saved default split
 and selected shared caches are tracked with regular Git storage; raw data,
-working files, local notebooks, and local retired-code archives are ignored.
-Historical Qwen checkpoints, results, configs, and warmup caches remain at their
-original locations. Local `models/archive/qwen3_4b/` and
-`models/archive/qwen3_4b_lora_EXPT2/` under the source package retain original
-code/config/docs snapshots and retirement notes; they are reference material,
-not independently runnable packages. Historical artifacts may coexist with current ones. Application logic must not
+working files, and local notebooks are ignored. Historical artifacts may coexist
+with current ones. Application logic must not
 depend on a particular timestamped run or assume every artifact directory is
 present in a fresh checkout.
 

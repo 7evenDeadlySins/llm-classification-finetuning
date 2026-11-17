@@ -1,23 +1,25 @@
-# 推荐外部训练数据（带原生平局的人类偏好数据）
+# 外部训练数据参考（来源、标签与当前接入规则）
 
 [Documentation index](../README.md) · [完整候选外部数据集参考](external-training-data.md)
 
-本文档从 [external-training-data.md](external-training-data.md) 中单独提取**符合本项目标准、优先推荐考虑**的 3 个真实人类偏好数据集（均包含原生 `tie` 与多轮对话），并附上**仅供参考的使用注意事项**。
+本文档从 [external-training-data.md](external-training-data.md) 中记录 Arena human、Arena expert 及暂时停用的 HelpSteer3，并保留已确定的处理规则与来源说明。接入并不代表已证明能改善竞赛结果。
+
+2026-11-17 的[数据来源排查](data-source-audit-2026-11-17.md)发现显著分布差异，并修正两项来源判断：HelpSteer3 的零分来自个人偏好评分聚合，不能等同于 Arena 用户直接选择的原生平局；Arena expert 根据问题内容筛选专家级任务，不能仅据名称认定投票经过专业专家复核或噪声更低。随后按用户要求暂时移出 HelpSteer3 preference，重新合并其余来源并生成两套补充集；原始文件与接入代码保留。
 
 ## 已确定的处理原则
 
 **数据混合与类别比例**：清洗、去重并完成验证集隔离后，全部真实样本合并训练，按行等权；不按来源额外加权或重采样，也不采用按来源划分的两阶段训练。Kaggle 的重复对局保留优先级仅用于去重，不赋予其更高训练权重。
 
 * **真实数据保留自然比例，训练时补齐 tie**：真实合并表保留全部自然类别比例；训练时追加独立自回复平局，使 tie 比例最接近 Kaggle 的 `17788/57477`（约 `30.9480%`）。不额外设置类别权重或重采样，全部真实及合成训练行等权。
-* **恢复旧合成规则（2026-11-17）**：重新计算并分别生成 train 与 build 补充集，不复用旧的 1,012 条产物。移出模型上下文超限样本后，验证训练和独立 warmup 仅从真实 train 取候选及统计历史胜率，补 16,761 条；全量 build 及其内置 warmup 从全部真实数据取候选，补 16,760 条。两份补充集互斥加载，历史胜率均值均须精确为 `1/2`；验证集不追加合成行。配置分别使用 `data.train_supplement_path` 与 `data.build_supplement_path`，详见[生成规则](data-preparation.md#scope-specific-synthetic-ties)。
+* **恢复旧合成规则（2026-11-17）**：分别生成 train 与 build 补充集，不复用旧的 1,012 条产物。暂时移出 HelpSteer3 并排除模型上下文超限样本后，验证训练和独立 warmup 仅从真实 train 取候选及统计历史胜率，补 7,343 条，占补充后训练数据的 3.3942%；全量 build 及其内置 warmup 从全部真实数据取候选，补 7,342 条，占补充后数据的 3.2225%。两份补充集互斥加载，历史胜率均值均须精确为 `1/2`；验证集不追加合成行。配置分别使用 `data.train_supplement_path` 与 `data.build_supplement_path`，详见[生成规则](data-preparation.md#scope-specific-synthetic-ties)。
 
 合成时保留原有初选与全胜替换；若历史分数中的 `1/3` 等比例使最后一次半胜替换不可行，允许用一次或两次同 prompt 的精确分数替换完成调整。优先使用更少的替换，再比较总 token 长度变化和原有候选顺序；先执行降低分数的步骤，始终保留初始 prompt 覆盖与补充条数，最终均值仍须精确为 `1/2`。
 
-**全部使用硬标签**：以 `response1` 为 A、`response2` 为 B，HelpSteer3 的 `overall_preference < 0` 映射为 A 胜（`label=0`），`> 0` 映射为 B 胜（`label=1`），`0` 映射为平局（`label=2`）。不按偏好强度生成软标签、加权或删除弱偏好样本。每条原始记录的 `overall_preference` 计一票，不拆分 `individual_preference`。
+**全部使用硬标签**。HelpSteer3 暂时停用，其原接入规则保留供恢复：以 `response1` 为 A、`response2` 为 B，`overall_preference < 0` 映射为 A 胜（`label=0`），`> 0` 映射为 B 胜（`label=1`），`0` 映射为平局（`label=2`）。不按偏好强度生成软标签、加权或删除弱偏好样本。每条原始记录的 `overall_preference` 计一票，不拆分 `individual_preference`。
 
 **语言与领域全部保留**：不按自然语言、任务领域或职业标签筛选样本。非英文内容保留原文，直接使用现有 tokenizer 与训练流程，不翻译；仍执行结构校验、去重与验证集隔离。完整统计分支长度，超出旧 `13866` token 上限但未超过原模型上下文的样本保留且不截断。任一完整分支超过固定模型版本的 `max_position_embeddings=40960` 时，整条对局移出训练集并单独保存；不按 A+B 长度之和筛除。当前模型及 warmup 的 `max_length` 同步设为 `40960`。
 
-* HelpSteer3 的 General、STEM、Code、Multilingual 四个领域全部纳入；其 Code 域的 `language` 表示编程语言，不能据此当作非英文样本排除。
+* HelpSteer3 停用前的 General、STEM、Code、Multilingual 四个领域全部纳入；其 Code 域的 `language` 表示编程语言，不能据此当作非英文样本排除。
 * Arena human 的代码、数学、创意写作、指令遵循等类别，以及 Arena expert 的全部 `occupational_tags` 均保留，不据此过滤。
 
 **多模态样本整条排除**：任一分支的当前对话或需要回填的历史中包含图片、音频等非文本内容时，排除整条样本，不通过删除非文本部分后保留文本来沿用原标签。纯文本消息的内容列表按原顺序提取、拼接文本；空回复按下述规则处理，不因文本为空而直接删除。
@@ -49,33 +51,36 @@
 | 外部样本内部、不同外部数据集之间（含 LMSYS） | 完整 prompt 和回答对均相同，包括 A/B 互换 | 同一投票副本只计一次；独立投票统一方向后取最多票类别，最高票并列则删除；保留对局的权重为 `1` |
 | 外部样本与冻结的 Kaggle **验证集** | prompt 相同 | 排除外部样本，保持验证集按 prompt 隔离 |
 
-## 推荐数据集概览
+## 已接入与暂时停用的数据集
 
 | 数据集 | 规模 | 采集/发布时间 | 覆盖范围 | 标签映射 | 授权协议 |
 | --- | --- | --- | --- | --- | --- |
 | [`lmarena-ai/arena-human-preference-140k`](https://huggingface.co/datasets/lmarena-ai/arena-human-preference-140k) | 135,634 行 | 2025-04-17 至 2025-07-24 | 126 种语言（英文 >50%）；53 个模型 | `winner`: `model_a` -> `0`，`model_b` -> `1`，`tie` / `both_bad` -> `2` | Prompts `CC-BY-4.0`；输出受各模型提供商条款约束 |
 | [`lmarena-ai/arena-expert-5k`](https://huggingface.co/datasets/lmarena-ai/arena-expert-5k) | 5,128 行 | 2025 年发布 | 35 种语言；105 个模型；含 `occupational_tags` | `winner`: `model_a` -> `0`，`model_b` -> `1`，`tie` / `both_bad` -> `2` | Prompts `CC-BY-4.0`；输出受各模型提供商条款约束 |
-| [`nvidia/HelpSteer3`](https://huggingface.co/datasets/nvidia/HelpSteer3) (`preference` split) | 40,476 行（train 38,459 / val 2,017） | 2025-05 发布 | General、STEM、Code、Multilingual | 负分 -> A 胜；正分 -> B 胜；零分 -> 平局，全部为硬标签 | `CC-BY-4.0` |
+| [`nvidia/HelpSteer3`](https://huggingface.co/datasets/nvidia/HelpSteer3) (`preference` split，**暂时停用**) | 40,476 行（train 38,459 / val 2,017） | 2025-05 发布 | General、STEM、Code、Multilingual | 原接入规则：负分 -> A 胜；正分 -> B 胜；零分 -> 平局，全部为硬标签 | `CC-BY-4.0` |
 
 ## 各自的使用注意事项（仅供参考）
 
 ### 1. `lmarena-ai/arena-human-preference-140k`
 
-* **优先度最高**：采集时间晚于 2024 年 Kaggle 竞赛与 `Skywork-Reward-V2` 发布时间，原生 4 类标签与任务分布最贴合。
+* **Arena 来源，但存在显著分布变化**：原生 4 类投票与竞赛形式相近；2025 年模型世代、语言、文本长度和多轮历史均有明显变化。较晚的采集时间不能证明它更贴合竞赛目标；本地量化差异与最新验证退步见[来源排查](data-source-audit-2026-11-17.md#2-实际训练混合与竞赛数据的差异)。
 * **内容解析与多模态排除**：`conversation_a` / `conversation_b` 中每条消息的 `content` 为字典列表（如 `[{"type": "text", "text": ..., "image": null, "mimeType": null}]`）。纯文本内容按原顺序提取拼接；当前对话或需回填的历史含实际非文本内容时整条排除，空回复沿用上述已确定规则。
 * **处理 `evaluation_order > 1`**：`conversation_a/b` 保存当前评估的对话，可能包含多轮；此前评估的历史保存在 `full_conversation`（模型侧键名为 `model_side_a` / `model_side_b`）。按上述已确定原则为每条有效投票补全对应的 A/B 上下文，保留当前评估的标签；历史回复可能来自此前评估的其他模型。字段定义见[官方数据集说明](https://huggingface.co/datasets/lmarena-ai/arena-human-preference-140k#overview)。
 * **完整长度统计**：序列最长可达 128 条消息，用固定版本的 `Skywork/Skywork-Reward-V2-Qwen3-4B` tokenizer（`sr2-qwen3-chat-template-v1`）统计完整分支长度；任一分支超过模型的 `40960` token 上限时整条移出，不截断后沿用原标签。
 
 ### 2. `lmarena-ai/arena-expert-5k`
 
-* **高质量专家标注**：噪声低于普通众包投票，适合作为 `140k` 的补充。
+* **专家级问题筛选**：官方用 DeepSeek-v3-0324 根据 prompt 判断专家级推理或知识，不据回答评定该标签。该筛选方式不能证明投票人经过专业资格审核，或标签噪声低于其他 Arena 投票。见[官方方法说明](https://arena.ai/blog/arena-expert)。
 * **字段键名差异**：整体结构与 `140k` 相似，但 `full_conversation` 内的模型侧键名为 `model_a` / `model_b`（而非 `140k` 的 `model_side_a` / `model_side_b`），解析脚本需分别兼容。
 * **源文件表示**：对话字段为包含 NumPy `array(..., dtype=object)` 的字符串表示，空内容还可能表示为 `array([], dtype=float64)`，外层元素间可能省略逗号。转换器仅解析受限容器语法，逐个还原字符串字面量，不执行表达式、不替换回复文本；空内容数组正常保留，源表示中的实际省略号或无法完整解析的记录排除并审计。
 * **跨集去重**：与 `arena-human-preference-140k` 存在来源及时间重叠，同时使用时应识别重复来源 `id`，并按完整上下文与回答对识别重复对局；`group_id` 用于 prompt 分组与验证隔离，不单独作为训练样本重复的依据。同样执行纯文本提取、整条多模态样本排除、上下文回填与完整长度统计。
 
-### 3. `nvidia/HelpSteer3`（`preference` split）
+### 3. `nvidia/HelpSteer3`（`preference` split，暂时停用）
 
-* **非 Arena 分布补充**：由 Scale AI 与 Translated 专业标注（注意 Code 域仅含英文 Prompt，Multilingual 域不含 Code Prompt），与 Arena 众包风格存在一定分布差异；本轮按上述原则与其他来源合并、按行等权训练。
+当前真实合并表与重新生成的两套补充集均不包含 HelpSteer3。以下保留其原接入规则和来源说明。
+
+* **零分的来源**：`overall_preference=0` 可由相反方向的个人评分平均、四舍五入产生，例如 `[-1, -1, +1] -> 0`。原论文发布这些记录，但没有将其用于奖励模型训练。本地保留的 1,435 条原始零分记录均来自这种分歧；当前将其映射为 tie 是项目已有规则，不能据此称为 Arena 原生平局。见[原论文 §2.1](https://arxiv.org/html/2505.11475v1#S2.SS1)。
+* **非 Arena 分布补充**：由 Scale AI 与 Translated 专业标注（注意 Code 域仅含英文 Prompt，Multilingual 域不含 Code Prompt），与 Arena 众包风格存在一定分布差异；停用前按上述原则与其他来源合并、按行等权训练。
 * **多轮上下文展开**：数据为 `context`（OpenAI 消息列表，1–79 条）+ `response1` + `response2`。转换时需将 `context` 中末轮之前的 `assistant` 回复同步填入 `response_a` 与 `response_b` 的前置轮次，最后一轮分别填入 `response1` 与 `response2`。
 * **角色与空回复清洗**：本项目 [ConversationSerializer](../src/llm_classification_finetuning/models/common/data.py) 不支持 `system` 角色且要求严格交替的 `user`/`assistant` 轮次，无法严格对齐的样本直接排除，不改写角色。`response1` / `response2` 单侧为空时保留原硬标签；双侧为空时判平。
 * **合并原始 split**：自带的 5% `validation` 不可混入本项目的验证集，若用于训练应全部归入 `split="train"`。
