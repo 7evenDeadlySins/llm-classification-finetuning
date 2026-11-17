@@ -1,4 +1,4 @@
-"""Validate independent supplements for train-partition and full-data inputs."""
+"""Validate independent synthetic ties for train-partition and full-data inputs."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pyarrow.parquet as pq
 
 from ...errors import ModelExecutionError
 from .cache_storage import CacheStorage
-from .inputs import TrainingInputLoader, TrainingInputs, _sha256
+from .inputs import TrainingInputs, TrainingInputLoader, _sha256
 
 
 class BuildSupplementLoader:
@@ -22,20 +22,12 @@ class BuildSupplementLoader:
 	SCHEMA_VERSION = 2
 	TARGET_TIE_SHARE = Fraction(17788, 57477)
 	METADATA_KEY = b"llm_classification_finetuning.synthetic_tie"
-	DUPLICATE_METADATA_KEY = b"llm_classification_finetuning.row_duplicate"
-	DUPLICATE_SCHEMA_VERSION = 1
-	KAGGLE_TIE_DUPLICATE_KIND = "kaggle_tie_duplicate"
 	PROVENANCE_COLUMNS = (
 		"source_original_id",
 		"source_side",
 		"source_split",
 		"historical_wins",
 		"historical_occurrences",
-	)
-	DUPLICATE_PROVENANCE_COLUMNS = (
-		"source_original_id",
-		"source_split",
-		"source_dataset",
 	)
 
 	def __init__(self, path: Path, *, scope: str = "build") -> None:
@@ -102,19 +94,14 @@ class BuildSupplementLoader:
 		try:
 			storage = CacheStorage(self.path)
 			if not storage.exists():
-				raise ValueError("configured supplement is missing")
+				raise ValueError(
+					"configured supplement is missing; run data/generate_synthetic_tie.py"
+				)
 			with storage.open("r") as session:
 				metadata = pq.read_schema(session.path).metadata or {}
+				identity = json.loads(metadata[self.METADATA_KEY])
 				data = pd.read_parquet(session.path)
 				fingerprint = _sha256(session.path)
-			if (
-				self.DUPLICATE_METADATA_KEY in metadata
-				and self.METADATA_KEY not in metadata
-			):
-				identity = json.loads(metadata[self.DUPLICATE_METADATA_KEY])
-				self._load_duplicate(data, identity, original)
-				return TrainingInputs(data, fingerprint)
-			identity = json.loads(metadata[self.METADATA_KEY])
 			version = identity.get("schema_version")
 			if version not in {1, self.SCHEMA_VERSION}:
 				raise ValueError("unsupported synthetic-tie schema")
@@ -146,122 +133,6 @@ class BuildSupplementLoader:
 			raise ModelExecutionError(
 				f"Invalid {self.scope} supplement {self.path}: {error}"
 			) from error
-
-	def _load_duplicate(
-		self,
-		data: pd.DataFrame,
-		identity: dict,
-		original: TrainingInputs,
-	) -> None:
-		"""Validate metadata and contents for a real-row duplication supplement."""
-		if identity.get("schema_version") != self.DUPLICATE_SCHEMA_VERSION:
-			raise ValueError("unsupported duplicate supplement schema")
-		if identity.get("kind") != self.KAGGLE_TIE_DUPLICATE_KIND:
-			raise ValueError("unsupported duplicate supplement kind")
-		if identity.get("scope") != self.scope:
-			raise ValueError(
-				"supplement scope does not match the requested training mode"
-			)
-		if identity.get("source_sha256") != original.fingerprint:
-			raise ValueError(
-				"supplement source SHA-256 does not match the processed dataset"
-			)
-		if (
-			identity.get("source_dataset") != "kaggle"
-			or identity.get("source_label") != 2
-			or identity.get("repeat") != 1
-		):
-			raise ValueError("duplicate supplement provenance metadata is inconsistent")
-		expected = self._duplicate_sources(original.data, self.scope)
-		if identity.get("target_count") != len(expected):
-			raise ValueError(f"supplement target count must be {len(expected):,}")
-		self.validate_duplicate(data, original.data, scope=self.scope)
-
-	@staticmethod
-	def _duplicate_sources(original: pd.DataFrame, scope: str) -> pd.DataFrame:
-		"""Select eligible Kaggle tie rows from the target scope."""
-		if scope not in {"train", "build"}:
-			raise ValueError("Supplement scope must be 'train' or 'build'.")
-		base = (
-			original.loc[original.split.eq("train")] if scope == "train" else original
-		)
-		if base.empty:
-			raise ValueError("Supplement scope has no original rows.")
-		kaggle = (
-			base["source"].eq("kaggle")
-			if "source" in base.columns
-			else base["id"].lt(1 << 32)
-		)
-		sources = base.loc[kaggle & base["label"].eq(2)]
-		if sources.empty:
-			raise ValueError("Supplement scope has no Kaggle tie rows.")
-		return sources
-
-	@classmethod
-	def validate_duplicate(
-		cls, data: pd.DataFrame, original: pd.DataFrame, *, scope: str = "build"
-	) -> None:
-		"""Check exact Kaggle tie duplicate count, IDs, labels, and source rows."""
-		required = [
-			*TrainingInputLoader.REQUIRED_COLUMNS,
-			*cls.DUPLICATE_PROVENANCE_COLUMNS,
-			"model_a",
-			"model_b",
-			"winner_model_a",
-			"winner_model_b",
-			"winner_tie",
-		]
-		expected = cls._duplicate_sources(original, scope)
-		if len(data) != len(expected) or data.loc[:, required].isna().any().any():
-			raise ValueError(f"supplement must contain {len(expected):,} complete rows")
-		for name in (
-			"id",
-			"source_original_id",
-			"label",
-			"winner_model_a",
-			"winner_model_b",
-			"winner_tie",
-		):
-			if not pd.api.types.is_integer_dtype(data[name]):
-				raise ValueError(f"{name} must contain integers")
-		if data.id.duplicated().any() or data.id.isin(original.id).any():
-			raise ValueError(
-				"supplement IDs are duplicated or collide with original IDs"
-			)
-		if not pd.api.types.is_bool_dtype(data.is_swapped) or data.is_swapped.any():
-			raise ValueError("supplement must contain unswapped rows only")
-		if not (
-			data.split.eq(scope).all()
-			and data.label.eq(2).all()
-			and data.winner_model_a.eq(0).all()
-			and data.winner_model_b.eq(0).all()
-			and data.winner_tie.eq(1).all()
-			and data.source_dataset.eq("kaggle").all()
-		):
-			raise ValueError(f"supplement must contain {scope} Kaggle tie duplicates")
-		if data.source_original_id.duplicated().any() or set(
-			data.source_original_id.astype("int64")
-		) != set(expected.id.astype("int64")):
-			raise ValueError(
-				"supplement source_original_id values must match eligible Kaggle ties once each"
-			)
-		if scope == "train":
-			validation = original.loc[original.split.eq("validation")]
-			if set(data.group_id) & set(validation.group_id):
-				raise ValueError("train supplement overlaps frozen validation prompts")
-		sources = expected.set_index("id")
-		for row in data.itertuples(index=False):
-			source = sources.loc[row.source_original_id]
-			if not (
-				row.prompt == source.prompt
-				and row.response_a == source.response_a
-				and row.response_b == source.response_b
-				and int(row.label) == int(source.label)
-				and row.group_id == source.group_id
-				and row.source_split == source.split
-				and bool(row.is_swapped) == bool(source.is_swapped)
-			):
-				raise ValueError(f"source provenance mismatch for ID {row.id}")
 
 	@classmethod
 	def validate(

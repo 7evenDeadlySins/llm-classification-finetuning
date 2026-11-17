@@ -1,16 +1,16 @@
-# Consume merged real preferences with the frozen Kaggle holdout and duplicated Kaggle train ties.
-# HelpSteer3 preference and synthetic ties are temporarily excluded; build_supplement_path remains null.
+# Consume merged real preferences with the frozen Kaggle holdout.
+# HelpSteer3 preference, restored prefix non-ties, 11,995 shortest external non-ties, and synthetic ties are temporarily excluded; rebuild procedure: docs/data-preparation.md.
 # Counts, source revisions and checksums: data/processed/external_merged/summary.json
 
 data:
   competition: llm-classification-finetuning
   raw_dir: data/raw
   processed_path: data/processed/external_merged/train_validation.parquet
-  train_supplement_path: data/kaggle_tie_duplicate/external_merged/train/kaggle_tie_duplicates.parquet
+  train_supplement_path: null
   build_supplement_path: null
 
 validation:
-  validation_fraction: 0.05213341073599042
+  validation_fraction: 0.05631767184361374
   random_state: 42
   tokenizer_name: Skywork/Skywork-Reward-V2-Qwen3-4B
   tokenizer_revision: fd958fef475f323f4e6b195930e3dd918485c668

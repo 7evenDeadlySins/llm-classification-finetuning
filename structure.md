@@ -46,12 +46,10 @@ flowchart TD
 The saved split included in Git can enter this flow without downloading raw data.
 Standalone warmup is optional; inline LoRA runs create/reuse their compatible
 warmup state. Validation does not save production checkpoints. Builds use IDs
-from both partitions. Current presets consume merged real data with hard labels,
-set `data.train_supplement_path` to the duplicated Kaggle training ties, and keep
-`data.build_supplement_path` as `null` (`synthetic_tie` supplements remain
-disabled); when enabled, validation and standalone warmup use the train
-supplement while builds use only the build supplement. The frozen validation
-rows remain real-only.
+from both partitions. Current presets consume merged real data with hard labels and
+temporarily disable both synthetic tie supplements (`null`); when enabled,
+validation and standalone warmup use the train supplement while builds use only
+the build supplement. The frozen validation rows remain real-only.
 Frozen SR2 saves only its independent head; LoRA builds
 also export the merged backbone with its tokenizer.
 
@@ -137,7 +135,6 @@ Package `__init__.py` files expose intended public interfaces unless noted.
 | `preprocess/deduplication.py` | `ExternalBattleDeduplicator`: complete-prompt/unordered-pair identities, validation exclusion, optional independent hard-vote merging, conflicting-vote diagnostics and representative/status/count audits |
 | `preprocess/splits.py` | Exact-response tie correction before labels/prompt hashes, grouped class quotas, balance orchestration, original-only integrity summaries, and processed publication |
 | `preprocess/synthetic_tie.py` | Deterministic train/build self-response tie generation with dynamic counts, exact rational win-rate adjustment, full source/selection/replacement audits with bounded-volume streaming, and staged publication; invoked by `data/generate_synthetic_tie.py` |
-| `preprocess/kaggle_tie_duplicate.py` | Deterministic train/build Kaggle tie row duplication (`repeat=1`), schema/provenance metadata, roundtrip checks, and staged publication; invoked by `data/generate_kaggle_tie_duplicate.py` |
 | `preprocess/token_balance.py` | Canonical token counting and deterministic equal-class whole-group exchanges |
 
 ### Profile registration and warmup
@@ -174,7 +171,7 @@ with the current SR2 head and warmup feature identities, rather than legacy MLP 
 | Module | Owns |
 | --- | --- |
 | `contracts.py` | Execution modes, pipeline interface, and validation/build/warmup result summaries, including best-validation epoch/t, final build t, optional executed warmup/joint epoch counts and merged-backbone path for builds |
-| `supplement.py` | Scope-specific supplement loading (synthetic ties and real-row Kaggle tie duplicates), calculated counts, source fingerprint/provenance and validation-isolation checks, independent historical-score validation, and composite training fingerprints |
+| `supplement.py` | Scope-specific supplement loading, calculated counts, source fingerprint/provenance and validation-isolation checks, independent historical-score validation, and composite training fingerprints |
 | `inputs.py` | Processed table loading, strict original-only split/ID validation, multipart reads, and reconstructed source fingerprints |
 | `data.py` | Tokenizer-injected official chat-template serialization and pairwise training repository |
 | `hardware.py` | CUDA/precision validation, single-GPU placement, isolated phase intervals with cross-epoch allocator maxima, and reset-safe global peaks |
@@ -227,15 +224,14 @@ defaults to `./results` and controls validation, report, and log roots.
 | `config.yaml`, `configs/*.yaml` | Independent complete current presets |
 | `.env.example` | Kaggle token, model/training-cache/result paths, and offline HF execution template |
 | `pyproject.toml`, `uv.lock`, `.python-version` | Package/entry points, training dependencies, and Python version |
-| `data/merge_external_data.py`, `data/generate_synthetic_tie.py`, `data/generate_kaggle_tie_duplicate.py` | Standalone entry points for real-data merging, optional synthetic tie generation, and Kaggle tie duplication |
+| `data/merge_external_data.py`, `data/generate_synthetic_tie.py` | Standalone entry points for real-data merging and optional synthetic tie generation |
 | `<MODEL_PATH>/models--*/` | Native HF downloads; outside training-cache multipart storage |
 | `data/raw/` | Downloaded `train.csv` |
 | `data/raw/external/` | Pinned official real preference sources and checksummed download lock |
 | `data/processed/train_validation.parquet` | Logical saved split; single file or manifest plus volumes |
 | `data/processed/lmsys33k/` | Historical Kaggle + LMSYS snapshot, also the frozen Kaggle baseline for the merger |
 | `data/processed/external_merged/` | Current merged real-only hard-label data, frozen validation IDs, conversion/vote/token audits and checksums |
-| `data/kaggle_tie_duplicate/external_merged/train/` | Current train-scope Kaggle tie duplicate supplement (`train_supplement_path` in presets) |
-| `data/synthetic_tie/external_merged/context40960/train/`, `build/` | Scope-specific train/build synthetic tie target paths (currently disabled and removed locally) |
+| `data/synthetic_tie/external_merged/context40960/train/`, `build/` | Scope-specific train/build synthetic tie target paths (currently `null` in presets and removed locally) |
 | `data/synthetic_tie/lmsys33k/` | Historical build supplement path (deleted locally; disabled in current presets) |
 | `<CACHE_PATH>/token_cache/`, `embedding_cache/`, `adapter_batches/plans/` | Shared token, frozen/warmup-feature, and LoRA base-plan stores |
 | `<CACHE_PATH>/SR2_Qwen3_4B_lora_warmup/` | Completed Skywork head state, shared by frozen SR2, LoRA SR2, and standalone warmup |

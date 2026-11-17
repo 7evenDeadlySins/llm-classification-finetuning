@@ -6,22 +6,20 @@ from .deduplication import (
 	ExternalVoteConflictError,
 )
 from .external import (
-	TARGET_COLUMNS,
 	ConversationExclusion,
 	ExternalConversationConverter,
+	TARGET_COLUMNS,
 )
-from .kaggle_tie_duplicate import KaggleTieDuplicateGenerator
 from .splits import SplitPreparationResult, SplitPreprocessor, SplitSummary
 from .synthetic_tie import SyntheticTieGenerator
 
 __all__ = (
-	"TARGET_COLUMNS",
-	"ConversationExclusion",
 	"ExternalBattleDeduplicator",
-	"ExternalConversationConverter",
 	"ExternalDeduplicationResult",
 	"ExternalVoteConflictError",
-	"KaggleTieDuplicateGenerator",
+	"ConversationExclusion",
+	"ExternalConversationConverter",
+	"TARGET_COLUMNS",
 	"SplitPreparationResult",
 	"SplitPreprocessor",
 	"SplitSummary",
