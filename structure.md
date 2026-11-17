@@ -170,7 +170,7 @@ with the current SR2 head and warmup feature identities, rather than legacy MLP 
 
 | Module | Owns |
 | --- | --- |
-| `contracts.py` | Execution modes, pipeline interface, and validation/build/warmup result summaries, including optional executed warmup/joint epoch counts and merged-backbone path for builds |
+| `contracts.py` | Execution modes, pipeline interface, and validation/build/warmup result summaries, including best-validation epoch/t, final build t, optional executed warmup/joint epoch counts and merged-backbone path for builds |
 | `supplement.py` | Scope-specific supplement loading, calculated counts, source fingerprint/provenance and validation-isolation checks, independent historical-score validation, and composite training fingerprints |
 | `inputs.py` | Processed table loading, strict original-only split/ID validation, multipart reads, and reconstructed source fingerprints |
 | `data.py` | Tokenizer-injected official chat-template serialization and pairwise training repository |

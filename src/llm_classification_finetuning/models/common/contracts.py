@@ -30,6 +30,8 @@ class ModelRunResult:
 	validation_loss: float
 	cache_path: Path | None = None
 	cache_reused: bool = False
+	best_validation_epoch: int | None = None
+	best_validation_t: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +47,7 @@ class ModelBuildResult:
 	executed_warmup_epochs: int | None = None
 	executed_joint_epochs: int | None = None
 	merged_backbone_path: Path | None = None
+	final_t: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

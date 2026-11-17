@@ -118,7 +118,14 @@ class SR2ModelPipeline:
 						prediction_aggregation="original_only",
 					)
 				)
-				return ModelRunResult(output_dir, predictions, validation_loss)
+				best = min(result.epochs, key=lambda epoch: epoch.validation_loss)
+				return ModelRunResult(
+					output_dir,
+					predictions,
+					validation_loss,
+					best_validation_epoch=best.epoch,
+					best_validation_t=best.t,
+				)
 			model = trainer.create_model(
 				seed=self._model_config.random_state, revision=batches.base_revision
 			)
@@ -145,6 +152,7 @@ class SR2ModelPipeline:
 					training_rows=history.training_rows,
 					epochs=len(history.training_losses),
 					final_training_loss=history.warmup_training_loss,
+					final_t=model.t,
 				)
 			finally:
 				del model

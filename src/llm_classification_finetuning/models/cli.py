@@ -302,6 +302,8 @@ def _print_result(selector: str, result: ModelExecutionResult) -> None:
 			print(f"Executed joint training epochs: {result.executed_joint_epochs}")
 		print(f"Final training loss: {result.final_training_loss:.6f}")
 		print(f"Wrote model checkpoint: {result.checkpoint_path}")
+		if result.final_t is not None:
+			print(f"Final t: {result.final_t:.6f}")
 		if result.merged_backbone_path is not None:
 			print(f"Wrote merged backbone: {result.merged_backbone_path}")
 	elif isinstance(result, ModelRunResult):
@@ -310,6 +312,11 @@ def _print_result(selector: str, result: ModelExecutionResult) -> None:
 		)
 		print(f"Validation log loss: {result.validation_loss:.6f}")
 		print(f"Wrote model results: {result.output_dir}")
+		if result.best_validation_t is not None:
+			print(
+				f"Best validation epoch: {result.best_validation_epoch}; "
+				f"t: {result.best_validation_t:.6f}"
+			)
 	else:
 		raise TypeError(f"Unsupported model result: {type(result).__name__}")
 

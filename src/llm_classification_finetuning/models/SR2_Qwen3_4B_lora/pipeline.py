@@ -106,7 +106,16 @@ class LoRAModelPipeline:
 					else "ab_swap_average"
 				),
 			)
-			return ModelRunResult(output_dir, predictions, validation_loss)
+			best = min(
+				validation_result.epochs, key=lambda epoch: epoch.validation_loss
+			)
+			return ModelRunResult(
+				output_dir,
+				predictions,
+				validation_loss,
+				best_validation_epoch=best.epoch,
+				best_validation_t=best.t,
+			)
 		except torch.cuda.OutOfMemoryError as error:
 			raise ModelExecutionError(
 				f"CUDA ran out of memory during {self._model_label} execution. Lower "
@@ -212,6 +221,7 @@ class LoRAModelPipeline:
 				executed_warmup_epochs=history.executed_warmup_epochs,
 				executed_joint_epochs=history.executed_joint_epochs,
 				merged_backbone_path=merged_backbone_path,
+				final_t=model.t,
 			)
 		finally:
 			del model

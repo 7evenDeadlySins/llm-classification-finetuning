@@ -888,6 +888,7 @@ class LoRATrainer:
 						validation_time_seconds=validation_finished - training_finished,
 						total_time_seconds=validation_finished - epoch_started,
 						last_step_training_loss=last_step_training_loss,
+						t=model.t,
 					)
 				)
 				if plateau_lr_schedule is not None:
