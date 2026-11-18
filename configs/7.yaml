@@ -25,19 +25,19 @@ gpu:
 t: 3
 
 SR2_Qwen3_4B:
-  factor: 0.95
+  factor: 0.75
   patience: 2
-  early_stopping: 7
+  early_stopping: 5
   label_smoothing: 0.0
   model_name: Skywork/Skywork-Reward-V2-Qwen3-4B
   max_length: 40960
   hidden_size: 128
   dropout: 0.1
-  build_epochs: 37
+  build_epochs: 45
   extraction_budget: 917504
   training_batch_size: 1024
-  learning_rate: 0.000125
-  build_min_lr: 0.09 ** 4
+  learning_rate: 0.0001
+  build_min_lr: 0.085 ** 5
   weight_decay: 0.01
   max_grad_norm: 1.0
   random_state: 42
@@ -49,7 +49,7 @@ warmup:
   max_length: 40960
   hidden_size: 128
   dropout: 0.1
-  build_epochs: 9
+  build_epochs: 22
   extraction_budget: 917504
   training_batch_size: 1024
   learning_rate: 0.0001
@@ -68,7 +68,7 @@ SR2_Qwen3_4B_lora:
   training_batch_size: 1
   head_inference_batch_size: 1024
   gradient_accumulation_steps: 1024
-  epochs: 3
+  epochs: 2
   extraction_budget: 778240
   learning_rate: 0.0001
   min_lr_ratio: 0.0
@@ -78,8 +78,8 @@ SR2_Qwen3_4B_lora:
   dropout: 0.1
   max_grad_norm: 1.0
   lora_dropout: 0.1
-  lora_rank: 8
-  lora_alpha: 16
+  lora_rank: 16
+  lora_alpha: 32
   lora_target_modules:
     - q_proj
     - k_proj

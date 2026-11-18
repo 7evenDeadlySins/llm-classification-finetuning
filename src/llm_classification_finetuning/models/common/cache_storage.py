@@ -185,7 +185,6 @@ class CacheStorage:
 						raise OSError("Cache manifest exceeds the file size limit.")
 					staged.append((working_manifest, self.manifest_path))
 				for working, target in staged:
-					target.parent.mkdir(parents=True, exist_ok=True)
 					self._replace_file(working, target)
 					copied.append(target)
 			return tuple(copied)
@@ -359,6 +358,7 @@ class CacheStorage:
 	@staticmethod
 	def _replace_file(source: Path, destination: Path) -> None:
 		"""Publish atomically with destination-directory permissions on Windows."""
+		destination.parent.mkdir(parents=True, exist_ok=True)
 		if os.name != "nt":
 			try:
 				os.replace(source, destination)
