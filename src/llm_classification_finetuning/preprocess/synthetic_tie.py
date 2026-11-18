@@ -9,7 +9,7 @@ import json
 import shutil
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -27,9 +27,9 @@ from ..models.common import (
 	BuildSupplementLoader,
 	CacheStorage,
 	ConversationSerializer,
+	TokenizationCache,
 	TrainingInputLoader,
 	TrainingInputs,
-	TokenizationCache,
 	staged_output_directory,
 )
 
@@ -246,7 +246,7 @@ class SyntheticTieGenerator:
 			gc.collect()
 			self._verify(stage, supplement)
 			self.report["status"] = "completed"
-			self.report["completed_at"] = datetime.now(timezone.utc).isoformat()
+			self.report["completed_at"] = datetime.now(UTC).isoformat()
 			self.report["artifacts"] = {
 				str(path.relative_to(stage)): {
 					"bytes": path.stat().st_size,

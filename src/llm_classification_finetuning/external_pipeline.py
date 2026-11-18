@@ -7,7 +7,7 @@ import hashlib
 import json
 import shutil
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -27,11 +27,11 @@ from .models.common import (
 	staged_output_directory,
 )
 from .preprocess import (
+	TARGET_COLUMNS,
 	ConversationExclusion,
 	ExternalBattleDeduplicator,
 	ExternalConversationConverter,
 	ExternalVoteConflictError,
-	TARGET_COLUMNS,
 )
 
 
@@ -122,9 +122,9 @@ class MergeExternalDataPipeline:
 					external, baseline, merge_votes=True
 				)
 			except ExternalVoteConflictError as error:
-				self._write(
-					stage / "vote_conflicts.parquet", pd.DataFrame(error.conflicts)
-				)
+				conflicts_path = self.output.with_name("vote_conflicts.parquet")
+				self._write(conflicts_path, pd.DataFrame(error.conflicts))
+				print(f"Wrote vote conflicts diagnostic: {conflicts_path}", flush=True)
 				raise
 			candidates = pd.concat([baseline, result.data], ignore_index=True)
 			stats, identity = self._lengths(candidates)
@@ -188,7 +188,7 @@ class MergeExternalDataPipeline:
 			self._write(stage / "row_audit.parquet", row_audit)
 			self.report.update(
 				status="completed",
-				completed_at=datetime.now(timezone.utc).isoformat(),
+				completed_at=datetime.now(UTC).isoformat(),
 				logical_processed_path=str(self.output / "train_validation.parquet"),
 				processed_rows=len(data),
 				training_rows=len(data) - 11495,

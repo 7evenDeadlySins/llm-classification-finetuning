@@ -8,6 +8,8 @@ import json
 import os
 import re
 import shutil
+import stat
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -48,7 +50,14 @@ def staged_output_directory(target: Path) -> Iterator[Path]:
 			raise
 		published = True
 		if had_target and backup.exists():
-			shutil.rmtree(backup)
+			try:
+				shutil.rmtree(backup)
+			except OSError as error:
+				print(
+					f"Warning: could not remove superseded directory {backup}: {error}",
+					file=sys.stderr,
+					flush=True,
+				)
 	finally:
 		if not published and stage.exists():
 			shutil.rmtree(stage, ignore_errors=True)
@@ -93,8 +102,10 @@ class CacheStorage:
 		self.path = path.resolve()
 		self.manifest_path = self.path.with_name(f"{self.path.name}.manifest.json")
 		self.parts_path = self.path.with_name(f"{self.path.name}.parts")
+		uid_suffix = f"-{os.getuid()}" if hasattr(os, "getuid") else ""
 		self._work_root = (
-			Path(tempfile.gettempdir()) / "llm-classification-finetuning-cache-work"
+			Path(tempfile.gettempdir())
+			/ f"llm-classification-finetuning-cache-work{uid_suffix}"
 		)
 		self._lock_key = hashlib.sha256(
 			os.fsencode(os.path.normcase(self.path))
@@ -375,6 +386,8 @@ class CacheStorage:
 		try:
 			with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
 				shutil.copyfileobj(input_file, output, length=CacheStorage.COPY_SIZE)
+			if os.name != "nt":
+				os.chmod(staged, stat.S_IMODE(source.stat().st_mode))
 			os.replace(staged, destination)
 		finally:
 			staged.unlink(missing_ok=True)
