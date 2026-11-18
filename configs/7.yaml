@@ -1,16 +1,16 @@
-# Consume merged real preferences with the frozen Kaggle holdout and prioritized train tie duplicates.
-# HelpSteer3 preference and synthetic ties are temporarily excluded; build_supplement_path remains null.
-# Counts, source revisions and checksums: data/processed/external_merged/summary.json
+# Consume downsampled real preferences with the frozen Kaggle holdout and no supplements.
+# HelpSteer3 preference, synthetic ties, and tie duplication are temporarily excluded.
+# Counts, source revisions and checksums: data/processed/external_merged_downsampled/summary.json
 
 data:
   competition: llm-classification-finetuning
   raw_dir: data/raw
-  processed_path: data/processed/external_merged/train_validation.parquet
-  train_supplement_path: data/tie_duplicate/external_merged/train/tie_duplicates.parquet
+  processed_path: data/processed/external_merged_downsampled/train_validation.parquet
+  train_supplement_path: null
   build_supplement_path: null
 
 validation:
-  validation_fraction: 0.05213341073599042
+  validation_fraction: 0.05631767184361374
   random_state: 42
   tokenizer_name: Skywork/Skywork-Reward-V2-Qwen3-4B
   tokenizer_revision: fd958fef475f323f4e6b195930e3dd918485c668
@@ -21,6 +21,8 @@ gpu:
   precision: bf16
   attention_implementation: sdpa
   allow_tf32: false
+
+t: 3
 
 SR2_Qwen3_4B:
   factor: 0.95

@@ -116,18 +116,15 @@ uv run model SR2-Qwen3-4B-lora --build --checkpoint-tag experiment
 ```
 
 Both active model builds append `data.build_supplement_path` when configured.
-Current presets temporarily set `data.build_supplement_path` to `null` (excluding
+Current presets temporarily set both `data.train_supplement_path` and
+`data.build_supplement_path` to `null` (disabling both
+[tie duplication](data-preparation.md#tie-duplication) and
 [synthetic tie supplements](data-preparation.md#scope-specific-synthetic-ties))
-and use the 220,492-row context-filtered merged real preference dataset with
-HelpSteer3 temporarily excluded (208,997 real training rows; 11,495 frozen
-validation rows). For holdout validation and standalone warmup, current presets
-set `data.train_supplement_path` to the
-[tie duplicate supplement](data-preparation.md#tie-duplication),
-appending 7,343 duplicated distinct-response real training tie rows
-(excluding 422 identical-A/B training ties, capped at one row per prompt, and
-prioritized by lowest training prompt count, multi-turn conversation, and fewest
-A+B tokens; 216,340 effective training rows) while holdout evaluation retains
-only its 11,495 real rows.
+and use the 204,110-row [non-tie-downsampled real preference dataset](data-preparation.md#external-non-tie-downsampling)
+(192,615 real training rows; 11,495 frozen validation rows; 63,168 real ties,
+30.95%), derived from the 220,492-row HelpSteer3-excluded real merge. Holdout
+validation, standalone warmup, and full-data builds consume only the real
+dataset while preserving the 11,495 frozen validation rows.
 Build directly from the prepared dataset:
 
 ```shell

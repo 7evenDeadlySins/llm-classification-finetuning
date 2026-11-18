@@ -113,7 +113,7 @@ mirror, pass an optional source root:
 uv run python scripts/validate.py --data-source-root /content/drive/MyDrive/llm-classification-finetuning
 ```
 
-The mirror preserves project-relative paths: `data/processed/external_merged/` is looked
+The mirror preserves project-relative paths: `data/processed/external_merged_downsampled/` is looked
 up beneath that root. Relative source roots resolve from the project root; `~`
 is expanded. Without this argument, only local data is checked. A complete local
 artifact does not access the source root. An absolute processed path outside the

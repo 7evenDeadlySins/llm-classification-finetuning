@@ -46,12 +46,13 @@ flowchart TD
 The saved split included in Git can enter this flow without downloading raw data.
 Standalone warmup is optional; inline LoRA runs create/reuse their compatible
 warmup state. Validation does not save production checkpoints. Builds use IDs
-from both partitions. Current presets consume merged real data with hard labels,
-set `data.train_supplement_path` to the prioritized training tie duplicates, and keep
-`data.build_supplement_path` as `null` (`synthetic_tie` supplements remain
-disabled); when enabled, validation and standalone warmup use the train
-supplement while builds use only the build supplement. The frozen validation
-rows remain real-only.
+from both partitions. Current presets consume the downsampled real preference
+dataset (`data/processed/external_merged_downsampled/train_validation.parquet`)
+with hard labels and set both `data.train_supplement_path` and
+`data.build_supplement_path` to `null` (both `tie_duplicate` and `synthetic_tie`
+supplements are temporarily disabled); when enabled, validation and standalone
+warmup use the train supplement while builds use only the build supplement. The
+frozen validation rows remain real-only.
 Frozen SR2 saves only its independent head; LoRA builds
 also export the merged backbone with its tokenizer.
 
@@ -92,10 +93,13 @@ Both scripts load each selected config from the project-root cwd
 and ensure its processed data before launching the model child, optionally
 filling missing components from a project mirror via `--data-source-root`.
 Successful data preparations are shared by resolved path within the batch;
-preparation failures use the existing task log and failure summary. Model builds
-also restore their configured supplement; preparation reuse identifies both paths.
-Standalone warmup and validation restore the train supplement; preparation
-reuse in both batch scripts includes the selected supplement path.
+preparation failures use the existing task log and failure summary. Current
+presets consume the downsampled real preference dataset
+(`data/processed/external_merged_downsampled/train_validation.parquet`) and set
+both `train_supplement_path` and `build_supplement_path` to `null`; when
+enabled, model builds restore their configured build supplement while standalone
+warmup and validation restore the train supplement, and preparation reuse
+identifies both paths.
 
 The ignored local `!validate.ipynb` and `!build.ipynb` provide Colab setup and
 their corresponding batch workflows. The build notebook additionally copies
@@ -233,8 +237,9 @@ defaults to `./results` and controls validation, report, and log roots.
 | `data/raw/external/` | Pinned official real preference sources and checksummed download lock |
 | `data/processed/train_validation.parquet` | Logical saved split; single file or manifest plus volumes |
 | `data/processed/lmsys33k/` | Historical Kaggle + LMSYS snapshot, also the frozen Kaggle baseline for the merger |
-| `data/processed/external_merged/` | Current merged real-only hard-label data, frozen validation IDs, conversion/vote/token audits and checksums |
-| `data/tie_duplicate/external_merged/train/` | Current train-scope prioritized tie duplicate supplement (`train_supplement_path` in presets) |
+| `data/processed/external_merged/` | Full merged real-only hard-label data (220,492 rows), frozen validation IDs, conversion/vote/token audits and checksums |
+| `data/processed/external_merged_downsampled/` | Current preset real-only hard-label data (204,110 rows after removing 16,382 external non-tie training rows), ranked deletion audit, token stats, and checksums |
+| `data/tie_duplicate/external_merged/train/` | Train-scope prioritized tie duplicate supplement bound to `external_merged` (currently disabled via `train_supplement_path: null`) |
 | `data/synthetic_tie/external_merged/context40960/train/`, `build/` | Scope-specific train/build synthetic tie target paths (currently disabled and removed locally) |
 | `data/synthetic_tie/lmsys33k/` | Historical build supplement path (deleted locally; disabled in current presets) |
 | `<CACHE_PATH>/token_cache/`, `embedding_cache/`, `adapter_batches/plans/` | Shared token, frozen/warmup-feature, and LoRA base-plan stores |

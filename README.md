@@ -18,14 +18,18 @@ For Colab and the local VS Code notebook workflow, see
 [Colab setup and persistence](docs/colab.md). To submit a build to Kaggle, see
 [Kaggle submission notebook](docs/kaggle-submission.md).
 
-The current real-only dataset has **220,492 rows**: **208,997 train** and
-**11,495 frozen Kaggle validation** rows. It combines Kaggle, LMSYS, Arena human,
-and Arena expert with hard labels. HelpSteer3 preference is temporarily excluded;
-its raw files and adapter remain available. The dataset retains 1,584 rows
-above the old token ceiling and excludes 102 battles exceeding the pinned model
-context, without truncation. Model and warmup limits are **40,960 tokens**;
-the longest retained branch has **40,953 tokens**. Rebuild and
-audit instructions are in [data preparation](docs/data-preparation.md#merged-external-preferences).
+The current downsampled real-only dataset has **204,110 rows**: **192,615 train**
+and **11,495 frozen Kaggle validation** rows (**63,168** ties, **30.95%**). It is
+derived from the 220,492-row real merge (Kaggle, LMSYS, Arena human, and Arena
+expert with hard labels; HelpSteer3 preference temporarily excluded) by removing
+16,382 external non-tie training rows; its raw files and merger adapter remain
+available. The dataset retains 1,584 rows above the old token ceiling and
+excludes 102 battles exceeding the pinned model context, without truncation.
+Model and warmup limits are **40,960 tokens**; the longest retained branch has
+**40,953 tokens**. Rebuild and audit instructions are in
+[data preparation](docs/data-preparation.md#merged-external-preferences), and the
+downsampling execution and audit are in
+[external non-tie downsampling](docs/data-preparation.md#external-non-tie-downsampling).
 Data preparation tools live in [data/](data/), including
 [the external-data merger](data/merge_external_data.py),
 [the synthetic tie generator](data/generate_synthetic_tie.py), and
@@ -42,24 +46,19 @@ Selectors and YAML section names are case-sensitive.
 
 Both profiles consume the saved train/validation split and train and predict on
 original A/B orientations only. Current presets use the
-[merged real preference dataset](docs/data-preparation.md#merged-external-preferences)
-with hard labels and a frozen Kaggle holdout (**208,997** real training rows;
-**220,492** real build rows). Synthetic self-response tie supplements remain
-excluded, and validation/warmup training currently duplicates **7,343** distinct-response
-real training tie rows once via `train_supplement_path` (from **59,188** eligible
-rows across **55,786** unique prompts after excluding **422** identical-A/B ties,
-capped at one row per prompt and prioritized by lowest training prompt count,
-multi-turn conversation, and fewest A+B tokens; **216,340** effective training
-rows, **30.95%** ties), while `build_supplement_path` remains `null` and the
-11,495 real validation rows remain unchanged.
-See [tie duplicates](docs/data-preparation.md#tie-duplication) and
-[synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties). `ALL`
-runs configured frozen SR2 before LoRA.
+[downsampled real preference dataset](docs/data-preparation.md#external-non-tie-downsampling)
+with hard labels and a frozen Kaggle holdout (**192,615** real training rows;
+**204,110** real build rows; **63,168** ties, **30.95%**). Both
+`train_supplement_path` and `build_supplement_path` are temporarily set to
+`null` (disabling [tie duplicates](docs/data-preparation.md#tie-duplication) and
+[synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties)), and
+the 11,495 real validation rows remain unchanged. `ALL` runs configured frozen
+SR2 before LoRA.
 Both profiles pool the last real token of each branch before the comparison
 head. LoRA joint training and validation use the same pooling as frozen SR2
 and head warmup.
 The tie formula uses a fixed absolute-difference coefficient `t`. The top-level
-YAML field `t` applies to both profiles and warmup and defaults to
+YAML field `t` applies to both profiles and warmup. If omitted, the parser uses
 `2φ + 1 = 2 + √5 ≈ 4.236068`, where `φ` is the golden ratio. Validation and build
 summaries print the effective value.
 The frozen model has independent training settings and shares

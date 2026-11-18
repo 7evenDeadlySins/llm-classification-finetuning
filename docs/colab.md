@@ -127,7 +127,7 @@ runtime available for recovery and retry.
 Both notebooks default `DRIVE_DATA_ROOT` to
 `/content/drive/MyDrive/llm-classification-finetuning`. This directory mirrors the
 project root: the merged real preference artifact belongs at
-`<DRIVE_DATA_ROOT>/data/processed/external_merged/train_validation.parquet`, or its
+`<DRIVE_DATA_ROOT>/data/processed/external_merged_downsampled/train_validation.parquet`, or its
 `.manifest.json` and referenced `.parts/` volumes. Change the settings cell to use
 a different mirror root.
 

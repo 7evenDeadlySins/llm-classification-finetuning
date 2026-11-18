@@ -63,10 +63,11 @@ is the compressed Parquet published. Failure leaves the previous dataset in plac
 ## Processed data
 
 The repository-backed logical path is `data/processed/train_validation.parquet`.
-The current presets consume the merged real preference dataset at
-`data/processed/external_merged/train_validation.parquet`, which is not included in Git.
-Keep `data.processed_path` pointing to the logical Parquet path whether it is a
-single file or multipart:
+Current presets consume the downsampled real preference dataset at
+`data/processed/external_merged_downsampled/train_validation.parquet` (derived
+from the 220,492-row merge at `data/processed/external_merged/train_validation.parquet`;
+neither dataset is included in Git). Keep `data.processed_path` pointing to
+the logical Parquet path whether it is a single file or multipart:
 
 - Below 100 MiB: the Zstandard-compressed `.parquet` file.
 - At least 100 MiB: `.parquet.manifest.json` plus `.parquet.parts/`, each volume
@@ -103,10 +104,12 @@ Current presets consume Kaggle + complete LMSYS 33K + Arena human + Arena expert
 with HelpSteer3 preference temporarily excluded on 2026-11-17. Data is constructed using the
 [adopted processing rules](recommended-external-data.md#已确定的处理原则).
 All targets are hard labels with integer one-hot winner fields. Rows have equal
-training weight. The saved real-data table retains its natural class proportions;
-current presets temporarily disable [scope-specific synthetic ties](#scope-specific-synthetic-ties),
-and enable [tie duplication](#tie-duplication) for validation
-training and standalone warmup (`train_supplement_path: data/tie_duplicate/external_merged/train/tie_duplicates.parquet`,
+training weight. The merged real-data table retains its natural class
+proportions; current presets consume its
+[non-tie-downsampled derivative](#external-non-tie-downsampling)
+(`data/processed/external_merged_downsampled/train_validation.parquet`) and
+temporarily disable both [scope-specific synthetic ties](#scope-specific-synthetic-ties)
+and [tie duplication](#tie-duplication) (`train_supplement_path: null`,
 `build_supplement_path: null`).
 
 The standard merger rebuilds the full pinned source set, including HelpSteer3:
@@ -161,10 +164,11 @@ unchanged `validation_ids.csv`, pinned `sources.json`, and these audits:
 | `summary.json`, `checksums.sha256` | Counts, identities, integrity checks, and file hashes |
 
 Publication is staged and read back through `TrainingInputLoader`; failed builds
-retain their diagnostics and preserve any prior successful dataset. Current
-presets set `validation.validation_fraction` to `11495 / total_rows` and configure
-the two independent supplement paths described below. Use this dedicated merger to rebuild the
-combined dataset; `init` and `preprocess` rebuild a Kaggle-only split.
+retain their diagnostics and preserve any prior successful dataset. After
+downsampling, current presets set `validation.validation_fraction` to
+`11495 / 204110` (`0.05631767184361374`) and leave both supplement paths
+`null`. Use this dedicated merger to rebuild the combined dataset; `init` and
+`preprocess` rebuild a Kaggle-only split.
 
 The 2026-11-17 context-filtered build without HelpSteer3 contains 220,492 rows: 208,997 train and
 the frozen 11,495 validation rows (tie share `63168 / 220492`, 28.6487%; train tie share `59610 / 208997`, 28.5219%). Its full-table validation fraction is
@@ -267,6 +271,83 @@ After any real-data rebuild, update `validation.validation_fraction` in
 both supplements with the command below. Their source fingerprints must match
 the newly published real table.
 
+### External non-tie downsampling
+
+Executed on 2026-11-18 and published to
+`data/processed/external_merged_downsampled/`
+([summary](../data/processed/external_merged_downsampled/summary.json)). The
+figures below match the
+[220,492-row real merge](../data/processed/external_merged/summary.json)
+(reconstructed SHA-256
+`9c1f041dc3cdfc63a8a924b9433d124da4905d93d5e40e4e03bcc03eeb993bc6`, 63,168 ties).
+The target is the project's corrected Kaggle tie share of `17788 / 57477`.
+Rounding the deletion count down with
+`floor(220492 - 63168 / (17788 / 57477)) = 16382` yields **204,110** rows
+(**192,615** train, **11,495** validation; reconstructed SHA-256
+`c0e4ca20ef4d1c0839794acd54aa20db36a76ef57d4d250aed5bf54c85d1c618`) and a tie
+share of `63168 / 204110` (30.94802%).
+
+Use every original external training row with `label` 0 or 1 as a deletion
+candidate. This covers Arena human, LMSYS, and Arena expert. Compute all
+frequencies once from the full real table before filtering, including ties and
+both splits. Count prompts by `group_id`. For branch frequency, use the complete
+prompt and that side's full response array as a single identity, with the same
+JSON normalization as battle deduplication. Pool A and B in the same counter
+and sum the two branch counts for each candidate. Join the retained rows in
+[`token_stats.parquet`](../data/processed/external_merged/token_stats.parquet)
+by `id` for `turns`, `tokens_a`, and `tokens_b`.
+
+Sort candidates by the following keys in order, using each key to break ties
+in the previous keys.
+
+1. Prompt frequency, highest first.
+2. Sum of the two branch frequencies, highest first.
+3. Single-turn rows (`turns == 1`) before multi-turn rows.
+4. `tokens_a + tokens_b`, highest first.
+5. Numeric `id`, lowest first, for deterministic selection.
+
+Take the first 16,382 IDs. The simulation selects all 8,999 eligible rows whose
+prompt occurs more than once. The other 7,383 rows have unique prompts and two
+distinct branches with a combined frequency of 2. They are all single-turn
+rows with at least 3,489 A+B tokens. The deletion totals by source are 12,270
+Arena human, 3,365 LMSYS, and 747 Arena expert. By label, they are 8,107 A wins
+and 8,275 B wins.
+
+The simulation removes 7.43% of rows and 10.59% of A+B tokens. Median A+B length
+falls from 1,129 to 1,091 tokens, P90 from 5,364 to 5,088, and P95 from 8,547 to
+about 8,467. The multi-turn share rises from 24.79% to 26.72%.
+
+| Longer branch (tokens) | Rows before | Rows after | Share removed | Tie share before → after |
+| --- | ---: | ---: | ---: | ---: |
+| ≤128 | 18,431 | 16,890 | 8.36% | 38.11% → 41.59% |
+| 129–512 | 70,719 | 67,165 | 5.03% | 29.49% → 31.05% |
+| 513–1,024 | 46,307 | 44,613 | 3.66% | 26.88% → 27.90% |
+| 1,025–2,048 | 43,587 | 41,711 | 4.30% | 26.23% → 27.41% |
+| 2,049–4,096 | 25,715 | 19,892 | 22.64% | 26.54% → 34.31% |
+| 4,097–8,192 | 10,946 | 9,430 | 13.85% | 28.69% → 33.30% |
+| >8,192 | 4,787 | 4,409 | 7.90% | 30.21% → 32.80% |
+
+In the single-turn part of the 2,049–4,096-token band, the selection removes
+5,806 of 8,348 non-ties (69.55%). The tie share rises from 24.84% to 52.05%,
+which could make the model more likely to predict ties in that band. The
+Arena-human-only simulation removes 84.20% of the same group's non-ties and
+raises its tie share to 67.66%.
+
+The execution recorded the source fingerprint (`9c1f041dc3cdfc63a8a924b9433d124da4905d93d5e40e4e03bcc03eeb993bc6`)
+and all 16,382 ranked deletion IDs with their sort keys in
+[`ranked_deletions.parquet`](../data/processed/external_merged_downsampled/ranked_deletions.parquet),
+published the filtered rows in their original order to
+`data/processed/external_merged_downsampled/`, and verified 192,615 training
+rows, the same 11,495 frozen Kaggle validation IDs, all 57,477 original Kaggle
+rows and 63,168 ties, and every expected source and length count above via
+`TrainingInputLoader` and `summary.json` / `checksums.sha256`. All current
+presets (`config.yaml` and `configs/1.yaml`–`7.yaml`) point to
+`data/processed/external_merged_downsampled/train_validation.parquet` with
+`validation.validation_fraction: 0.05631767184361374` (`11495 / 204110`),
+`data.train_supplement_path: null`, and `data.build_supplement_path: null`. The
+existing `external_merged` duplicate supplement remains bound to the
+220,492-row input table's fingerprint.
+
 ## Tie duplication
 
 To reinforce real distinct-response tie examples during holdout validation
@@ -282,9 +363,11 @@ uv run python data/generate_tie_duplicate.py --config config.yaml --scope all
 
 `--scope train|build|all` defaults to `all`, generating every configured scope,
 and `--target-count` defaults to `7343`.
-Current presets set `data.train_supplement_path` to
-`data/tie_duplicate/external_merged/train/tie_duplicates.parquet`
-and leave `data.build_supplement_path: null`:
+Current presets temporarily set both `data.train_supplement_path` and
+`data.build_supplement_path` to `null`. When enabled against the 220,492-row
+`external_merged` snapshot with `data.train_supplement_path` set to
+`data/tie_duplicate/external_merged/train/tie_duplicates.parquet` and
+`data.build_supplement_path: null`:
 
 - `train` scope selects from all **59,188** distinct-response `split="train"`
   tie rows across **55,786** unique prompts (excluding **422** identical-A/B
@@ -308,11 +391,10 @@ and leave `data.build_supplement_path: null`:
 ## Scope-specific synthetic ties
 
 The real-data merger preserves natural labels and counts. Current presets
-temporarily exclude synthetic ties (`data.build_supplement_path: null`;
-`data.train_supplement_path` is currently used for
-[tie duplication](#tie-duplication) instead), and the local
-synthetic-tie files under `data/synthetic_tie/external_merged/context40960/` were
-removed. When enabled,
+temporarily exclude both synthetic ties and tie duplication
+(`data.train_supplement_path: null`, `data.build_supplement_path: null`), and
+the local synthetic-tie files under `data/synthetic_tie/external_merged/context40960/`
+were removed. When enabled,
 training appends independent self-response ties to match the corrected
 Kaggle-only ratio `17788/57477` (30.9480313865%) as closely as an integer
 addition permits.
