@@ -39,7 +39,7 @@ class TrainingInputLoader:
 		self._processed_path = processed_path.resolve()
 		self._validation_fraction = validation_fraction
 
-	def load(self) -> TrainingInputs:
+	def load(self, *, include_source: bool = False) -> TrainingInputs:
 		storage = CacheStorage(self._processed_path)
 		if not storage.exists():
 			raise ModelExecutionError(
@@ -56,9 +56,15 @@ class TrainingInputLoader:
 						"Legacy fold data is no longer supported. Set data.processed_path "
 						"to data/processed/train_validation.parquet and run 'uv run preprocess'."
 					)
-				data = pd.read_parquet(
-					session.path, columns=list(self.REQUIRED_COLUMNS)
-				)
+				columns_to_load = list(self.REQUIRED_COLUMNS)
+				if include_source:
+					if "source" not in columns:
+						raise ModelExecutionError(
+							"Ranked external data selection requires a processed dataset "
+							"with a 'source' column."
+						)
+					columns_to_load.append("source")
+				data = pd.read_parquet(session.path, columns=columns_to_load)
 				fingerprint = _sha256(session.path)
 		except CacheCorruptionError as error:
 			raise ModelExecutionError(

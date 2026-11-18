@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 CONFIG_DIR = "configs"
 MODEL_CONFIGS: dict[str, list[str]] = {
 	# "SR2-Qwen3-4B": ["3.yaml", "4.yaml", "5.yaml", "6.yaml"],
-	"SR2-Qwen3-4B-lora": ["1.yaml"],
+	"SR2-Qwen3-4B-lora": ["2.yaml"],
 }
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -53,7 +53,7 @@ def _validate(data_source_root: Path | None = None) -> int:
 
 	config_dir = PROJECT_ROOT / CONFIG_DIR
 	failed_tasks: list[str] = []
-	prepared_paths: set[tuple[Path, Path | None]] = set()
+	prepared_paths: set[tuple[Path, Path | None, Path | None]] = set()
 	for model, configs in MODEL_CONFIGS.items():
 		for filename in configs:
 			config = config_dir / filename
@@ -67,6 +67,7 @@ def _validate(data_source_root: Path | None = None) -> int:
 				processed_path = app_config.data.processed_path
 				preparation_key = (
 					processed_path,
+					app_config.data.external_rank_path,
 					app_config.data.train_supplement_path,
 				)
 				if preparation_key not in prepared_paths:

@@ -38,6 +38,7 @@ class DataConfig:
 	processed_path: Path
 	build_supplement_path: Path | None = None
 	train_supplement_path: Path | None = None
+	external_rank_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +227,7 @@ class AppConfig:
 				"processed_path",
 				"build_supplement_path",
 				"train_supplement_path",
+				"external_rank_path",
 			},
 			"data",
 		)
@@ -282,6 +284,16 @@ class AppConfig:
 			raise ConfigurationError(
 				"data.processed_path must point to a .parquet file."
 			)
+		external_rank_path = None
+		if (rank_value := data_section.get("external_rank_path")) is not None:
+			external_rank_path = _resolve_path(
+				working_dir,
+				_require_non_empty_string(rank_value, "data.external_rank_path"),
+			)
+			if external_rank_path.suffix.lower() != ".csv":
+				raise ConfigurationError(
+					"data.external_rank_path must point to a .csv file."
+				)
 		build_supplement_value = data_section.get("build_supplement_path")
 		build_supplement_path = (
 			None
@@ -387,6 +399,7 @@ class AppConfig:
 				processed_path=processed_path,
 				build_supplement_path=build_supplement_path,
 				train_supplement_path=train_supplement_path,
+				external_rank_path=external_rank_path,
 			),
 			validation=ValidationConfig(
 				validation_fraction=validation_fraction,

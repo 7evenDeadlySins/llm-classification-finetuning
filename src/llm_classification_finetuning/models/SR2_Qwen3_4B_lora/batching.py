@@ -617,6 +617,7 @@ class LoRATrainingBatchRepository:
 				validation_fraction=config.validation.validation_fraction,
 				build_supplement_path=config.data.build_supplement_path,
 				train_supplement_path=config.data.train_supplement_path,
+				external_rank_path=config.data.external_rank_path,
 			)
 			data = repository.load(include_build_supplement=include_build_supplement)
 			return cls(

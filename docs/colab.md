@@ -127,12 +127,13 @@ runtime available for recovery and retry.
 Both notebooks default `DRIVE_DATA_ROOT` to
 `/content/drive/MyDrive/llm-classification-finetuning`. This directory mirrors the
 project root: the merged real preference artifact belongs at
-`<DRIVE_DATA_ROOT>/data/processed/external_merged_downsampled/train_validation.parquet`, or its
-`.manifest.json` and referenced `.parts/` volumes. Change the settings cell to use
-a different mirror root.
+`<DRIVE_DATA_ROOT>/data/processed/external_merged/train_validation.parquet`, or its
+`.manifest.json` and referenced `.parts/` volumes. Place the ranking CSV at
+`<DRIVE_DATA_ROOT>/data/processed/external_english_rarity_rank.csv`. Change the
+settings cell to use a different mirror root.
 
-Both batch scripts resolve every selected YAML's `data.processed_path` through the
-existing configuration parser, from `PROJECT_DIR`. Complete local artifacts are
+Both batch scripts resolve each selected YAML's `data.processed_path` and
+`data.external_rank_path` from `PROJECT_DIR`. Complete local artifacts are
 used without accessing the Drive data mirror, so repository-backed configurations
 can run in the same `MODEL_CONFIGS` batch. For example, a model
 selection can list both `"1.yaml"` and `"2.yaml"` in order. Model builds also

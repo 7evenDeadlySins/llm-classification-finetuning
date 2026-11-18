@@ -8,16 +8,15 @@
 
 ## 已确定的处理原则
 
-**数据混合与类别比例**：清洗、去重并完成验证集隔离后，全部真实样本合并训练，按行等权；不按来源额外加权或重采样，也不采用按来源划分的两阶段训练。Kaggle 的重复对局保留优先级仅用于去重，不赋予其更高训练权重。
+**数据混合与类别比例**：清洗、去重并隔离冻结验证集后，训练时以当前流程的 Kaggle 训练行为基准，从外部英文排序表选入相同数量的样本，并匹配平局数。平局和非平局分别按 `rank` 由小到大选取，所有入选行等权。[外部样本选取规则](data-preparation.md#ranked-external-training-selection)
 
-* **真实数据保留自然比例，训练时补齐 tie**：真实合并表保留全部自然类别比例；训练时追加独立自回复平局，使 tie 比例最接近 Kaggle 的 `17788/57477`（约 `30.9480%`）。不额外设置类别权重或重采样，全部真实及合成训练行等权。
-* **停用平局复制并执行外部非 tie 降采样（2026-11-18）**：各预设当前停用[平局复制](data-preparation.md#tie-duplication)与[合成自回复平局](data-preparation.md#scope-specific-synthetic-ties)（`data.train_supplement_path` 与 `data.build_supplement_path` 均设为 `null`），并切换至基于 220,492 行真实合并集执行[外部非 tie 降采样](data-preparation.md#external-non-tie-downsampling)后的独立数据集 `data/processed/external_merged_downsampled/train_validation.parquet`（剔除 16,382 条外部非平局训练样本，保留 204,110 行：训练集 192,615 行、验证集 11,495 行、平局 63,168 条占 `30.9480%`，对应 `validation.validation_fraction: 0.05631767184361374`）。此前用于 220,492 行真实表的[优先平局复制](data-preparation.md#tie-duplication)（`data/tie_duplicate/external_merged/train/tie_duplicates.parquet`，7,343 条）与[合成平局规则与生成器](data-preparation.md#scope-specific-synthetic-ties)（7,343 / 7,342 条）代码及说明均保留供参考或后续恢复。
+* **合并表保留原始类别比例**。各预设从 [220,492 行真实合并集](data-preparation.md#merged-external-preferences)取数，并保留 11,495 行冻结的 Kaggle 验证数据。两个补充集路径均设为 `null`，停用[平局复制](data-preparation.md#tie-duplication)和[合成自回复平局](data-preparation.md#scope-specific-synthetic-ties)。历史 204,110 行版本见[外部非 tie 降采样](data-preparation.md#external-non-tie-downsampling)。
 
 合成时保留原有初选与全胜替换；若历史分数中的 `1/3` 等比例使最后一次半胜替换不可行，允许用一次或两次同 prompt 的精确分数替换完成调整。优先使用更少的替换，再比较总 token 长度变化和原有候选顺序；先执行降低分数的步骤，始终保留初始 prompt 覆盖与补充条数，最终均值仍须精确为 `1/2`。
 
 **全部使用硬标签**。HelpSteer3 暂时停用，其原接入规则保留供恢复：以 `response1` 为 A、`response2` 为 B，`overall_preference < 0` 映射为 A 胜（`label=0`），`> 0` 映射为 B 胜（`label=1`），`0` 映射为平局（`label=2`）。不按偏好强度生成软标签、加权或删除弱偏好样本。每条原始记录的 `overall_preference` 计一票，不拆分 `individual_preference`。
 
-**语言与领域全部保留**：不按自然语言、任务领域或职业标签筛选样本。非英文内容保留原文，直接使用现有 tokenizer 与训练流程，不翻译；仍执行结构校验、去重与验证集隔离。完整统计分支长度，超出旧 `13866` token 上限但未超过原模型上下文的样本保留且不截断。任一完整分支超过固定模型版本的 `max_position_embeddings=40960` 时，整条对局移出训练集并单独保存；不按 A+B 长度之和筛除。当前模型及 warmup 的 `max_length` 同步设为 `40960`。
+**合并阶段保留语言与领域**：非英文内容保留原文，执行与英文内容相同的结构校验、去重与验证集隔离。训练阶段的外部候选限于英文排序表。合并表完整统计分支长度，超出旧 `13866` token 上限但未超过原模型上下文的样本保留原文。任一完整分支超过固定模型版本的 `max_position_embeddings=40960` 时，整条对局移出训练集并单独保存。当前模型及 warmup 的 `max_length` 同步设为 `40960`。
 
 * HelpSteer3 停用前的 General、STEM、Code、Multilingual 四个领域全部纳入；其 Code 域的 `language` 表示编程语言，不能据此当作非英文样本排除。
 * Arena human 的代码、数学、创意写作、指令遵循等类别，以及 Arena expert 的全部 `occupational_tags` 均保留，不据此过滤。

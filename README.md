@@ -18,17 +18,18 @@ For Colab and the local VS Code notebook workflow, see
 [Colab setup and persistence](docs/colab.md). To submit a build to Kaggle, see
 [Kaggle submission notebook](docs/kaggle-submission.md).
 
-The current downsampled real-only dataset has **204,110 rows**: **192,615 train**
-and **11,495 frozen Kaggle validation** rows (**63,168** ties, **30.95%**). It is
-derived from the 220,492-row real merge (Kaggle, LMSYS, Arena human, and Arena
-expert with hard labels; HelpSteer3 preference temporarily excluded) by removing
-16,382 external non-tie training rows; its raw files and merger adapter remain
-available. The dataset retains 1,584 rows above the old token ceiling and
-excludes 102 battles exceeding the pinned model context, without truncation.
-Model and warmup limits are **40,960 tokens**; the longest retained branch has
-**40,953 tokens**. Rebuild and audit instructions are in
-[data preparation](docs/data-preparation.md#merged-external-preferences), and the
-downsampling execution and audit are in
+The default presets select external training rows from the **220,492-row** real
+preference merge using `external_english_rarity_rank.csv`. External rows match
+the Kaggle row count and tie count in each training scope. Validation training
+and standalone warmup use **91,964 training rows** and the **11,495 frozen
+Kaggle validation rows**. Full-data builds use **114,954 training rows**,
+including both Kaggle partitions. See
+[ranked external selection](docs/data-preparation.md#ranked-external-training-selection).
+
+The merge combines hard labels from Kaggle, LMSYS, Arena human, and Arena
+expert. Model and warmup limits are **40,960 tokens**. Rebuild and audit
+instructions are in [merged external preferences](docs/data-preparation.md#merged-external-preferences).
+The separate 204,110-row snapshot is described in
 [external non-tie downsampling](docs/data-preparation.md#external-non-tie-downsampling).
 Data preparation tools live in [data/](data/), including
 [the external-data merger](data/merge_external_data.py),
@@ -44,16 +45,11 @@ Selectors and YAML section names are case-sensitive.
 | `SR2-Qwen3-4B` | `SR2_Qwen3_4B` | Frozen Skywork reward-trained Qwen3-4B; the same SR2 head; validation/build only |
 | `SR2-Qwen3-4B-lora` | `SR2_Qwen3_4B_lora` | Skywork reward-trained Qwen3-4B LoRA; swap-equivariant three-class head |
 
-Both profiles consume the saved train/validation split and train and predict on
-original A/B orientations only. Current presets use the
-[downsampled real preference dataset](docs/data-preparation.md#external-non-tie-downsampling)
-with hard labels and a frozen Kaggle holdout (**192,615** real training rows;
-**204,110** real build rows; **63,168** ties, **30.95%**). Both
+Both profiles train and predict on original A/B orientations only. Both
 `train_supplement_path` and `build_supplement_path` are temporarily set to
 `null` (disabling [tie duplicates](docs/data-preparation.md#tie-duplication) and
-[synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties)), and
-the 11,495 real validation rows remain unchanged. `ALL` runs configured frozen
-SR2 before LoRA.
+[synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties)).
+`ALL` runs configured frozen SR2 before LoRA.
 Both profiles pool the last real token of each branch before the comparison
 head. LoRA joint training and validation use the same pooling as frozen SR2
 and head warmup.

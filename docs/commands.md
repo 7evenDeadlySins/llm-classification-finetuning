@@ -101,7 +101,8 @@ follows the selected YAML.
 Validation logs use `<RESULT_PATH>/logs/validate-*.log`.
 
 Before each task starts, the script loads its YAML through `AppConfig` and checks
-the resolved `data.processed_path` from the project root. Complete local data is
+the resolved `data.processed_path`, `data.external_rank_path`, and any configured
+train supplement from the project root. Complete local data is
 used directly. The same batch can mix repository-backed configurations and
 the current numbered presets, whose prebuilt data is not included in Git. The script does not
 download raw data or run preprocessing.
@@ -113,9 +114,11 @@ mirror, pass an optional source root:
 uv run python scripts/validate.py --data-source-root /content/drive/MyDrive/llm-classification-finetuning
 ```
 
-The mirror preserves project-relative paths: `data/processed/external_merged_downsampled/` is looked
-up beneath that root. Relative source roots resolve from the project root; `~`
-is expanded. Without this argument, only local data is checked. A complete local
+The mirror preserves project-relative paths, including
+`data/processed/external_merged/` and `data/processed/external_english_rarity_rank.csv`.
+Relative source roots resolve
+from the project root, and `~` expands to the home directory. Without this
+argument, only local data is checked. A complete local
 artifact does not access the source root. An absolute processed path outside the
 project can be used locally, but missing files there cannot be mapped to the
 mirror.
@@ -153,19 +156,19 @@ Standalone warmup and full-data builds use different training ID sets; see
 [cache reuse](caching.md#standalone-warmup-build). Build logs use
 `<RESULT_PATH>/logs/build-*.log`.
 
-Before launching a task, the build script loads its YAML and ensures the resolved
-`data.processed_path` plus `data.build_supplement_path` for model builds, or
-`data.train_supplement_path` for standalone warmup, using the same pipeline as
-[batch validation](#batch-validation). Complete local data is reused; pass an
-optional project mirror to fill missing processed-data files:
+Before launching a task, the build script loads its YAML and ensures the saved
+data, any configured ranking CSV, and the supplement for that scope. It uses
+`data.build_supplement_path` for model builds and `data.train_supplement_path`
+for standalone warmup, through the same pipeline as
+[batch validation](#batch-validation). Pass an optional project mirror to fill
+missing files:
 
 ```bash
 uv run python scripts/build.py --data-source-root /content/drive/MyDrive/llm-classification-finetuning
 ```
 
-Validation and standalone warmup prepare the real dataset and the configured
-train supplement. Preparation reuse keys include the real and selected supplement
-paths, so one training scope does not skip another scope's supplement recovery.
+Preparation reuse keys include the saved data, ranking CSV, and selected
+supplement paths so each task has the files its configuration selects.
 
 Paths beneath the mirror follow the selected YAML rather than a fixed dataset
 directory. Single Parquet files and manifest-plus-volume artifacts are supported,

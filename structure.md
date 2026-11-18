@@ -30,9 +30,11 @@ flowchart TD
     Saved --> Merge["Frozen-holdout hard-vote merge"]
     External["Pinned real preference releases"] --> Merge
     Merge --> Data["Saved merged data"]
-    Data --> Validate["Holdout validation"]
-    Data --> Warmup["Train-only head-warmup cache"]
-    Data --> Build["Full-data build"]
+    Ranking["External ranking CSV"] --> Selection["Scope-specific external selection"]
+    Data --> Selection
+    Selection --> Validate["Holdout validation"]
+    Selection --> Warmup["Train-only head-warmup cache"]
+    Selection --> Build["Full-data build"]
     TrainTies["Train synthetic ties"] --> Validate
     TrainTies --> Warmup
     BuildTies["Build synthetic ties"] --> Build
@@ -45,10 +47,11 @@ flowchart TD
 
 The saved split included in Git can enter this flow without downloading raw data.
 Standalone warmup is optional; inline LoRA runs create/reuse their compatible
-warmup state. Validation does not save production checkpoints. Builds use IDs
-from both partitions. Current presets consume the downsampled real preference
-dataset (`data/processed/external_merged_downsampled/train_validation.parquet`)
-with hard labels and set both `data.train_supplement_path` and
+warmup state. Validation does not save production checkpoints. Builds use Kaggle
+IDs from both partitions. Current presets select external rows from the saved
+merge to match the active Kaggle row and tie counts. See
+[ranked external selection](docs/data-preparation.md#ranked-external-training-selection).
+The presets set both `data.train_supplement_path` and
 `data.build_supplement_path` to `null` (both `tie_duplicate` and `synthetic_tie`
 supplements are temporarily disabled); when enabled, validation and standalone
 warmup use the train supplement while builds use only the build supplement. The
@@ -89,17 +92,12 @@ terminal/log streaming, and failure summaries. Usage belongs in
 dedicated real-data merger without rebuilding the Kaggle holdout. It accepts
 `--config`, `--baseline-path`, and `--output-dir`; defaults and artifact meanings
 belong in [data preparation](docs/data-preparation.md#merged-external-preferences).
-Both scripts load each selected config from the project-root cwd
-and ensure its processed data before launching the model child, optionally
-filling missing components from a project mirror via `--data-source-root`.
+Both batch scripts load each selected config from the project-root cwd and ensure
+its saved data, any ranking CSV, and its scope-specific supplement before
+launching the model child. `--data-source-root` can fill missing files from a
+project mirror.
 Successful data preparations are shared by resolved path within the batch;
-preparation failures use the existing task log and failure summary. Current
-presets consume the downsampled real preference dataset
-(`data/processed/external_merged_downsampled/train_validation.parquet`) and set
-both `train_supplement_path` and `build_supplement_path` to `null`; when
-enabled, model builds restore their configured build supplement while standalone
-warmup and validation restore the train supplement, and preparation reuse
-identifies both paths.
+preparation failures use the existing task log and failure summary.
 
 The ignored local `!validate.ipynb` and `!build.ipynb` provide Colab setup and
 their corresponding batch workflows. The build notebook additionally copies
@@ -180,6 +178,7 @@ with the current SR2 head and warmup feature identities, rather than legacy MLP 
 | `contracts.py` | Execution modes, pipeline interface, and validation/build/warmup result summaries, including best-validation epoch/t, final build t, optional executed warmup/joint epoch counts and merged-backbone path for builds |
 | `supplement.py` | Scope-specific supplement loading (synthetic ties and real-row tie duplicates), calculated counts, source fingerprint/provenance and validation-isolation checks, independent historical-score validation, and composite training fingerprints |
 | `inputs.py` | Processed table loading, strict original-only split/ID validation, multipart reads, and reconstructed source fingerprints |
+| `external_selection.py` | CSV rank validation, eligible-ID matching, scope-specific Kaggle tie and non-tie quotas, and selected-data fingerprinting |
 | `data.py` | Tokenizer-injected official chat-template serialization and pairwise training repository |
 | `hardware.py` | CUDA/precision validation, single-GPU placement, isolated phase intervals with cross-epoch allocator maxima, and reset-safe global peaks |
 | `backbone.py` | Local weight/configuration content fingerprints for caches |
@@ -237,8 +236,9 @@ defaults to `./results` and controls validation, report, and log roots.
 | `data/raw/external/` | Pinned official real preference sources and checksummed download lock |
 | `data/processed/train_validation.parquet` | Logical saved split; single file or manifest plus volumes |
 | `data/processed/lmsys33k/` | Historical Kaggle + LMSYS snapshot, also the frozen Kaggle baseline for the merger |
-| `data/processed/external_merged/` | Full merged real-only hard-label data (220,492 rows), frozen validation IDs, conversion/vote/token audits and checksums |
-| `data/processed/external_merged_downsampled/` | Current preset real-only hard-label data (204,110 rows after removing 16,382 external non-tie training rows), ranked deletion audit, token stats, and checksums |
+| `data/processed/external_merged/` | Full real-only hard-label candidate pool (220,492 rows), frozen validation IDs, conversion/vote/token audits and checksums |
+| `data/processed/external_english_rarity_rank.csv` | Ranked external candidates for training selection |
+| `data/processed/external_merged_downsampled/` | Separate real-only hard-label snapshot (204,110 rows after removing 16,382 external non-tie training rows), ranked deletion audit, token stats, and checksums |
 | `data/tie_duplicate/external_merged/train/` | Train-scope prioritized tie duplicate supplement bound to `external_merged` (currently disabled via `train_supplement_path: null`) |
 | `data/synthetic_tie/external_merged/context40960/train/`, `build/` | Scope-specific train/build synthetic tie target paths (currently disabled and removed locally) |
 | `data/synthetic_tie/lmsys33k/` | Historical build supplement path (deleted locally; disabled in current presets) |

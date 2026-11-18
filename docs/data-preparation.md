@@ -63,11 +63,11 @@ is the compressed Parquet published. Failure leaves the previous dataset in plac
 ## Processed data
 
 The repository-backed logical path is `data/processed/train_validation.parquet`.
-Current presets consume the downsampled real preference dataset at
-`data/processed/external_merged_downsampled/train_validation.parquet` (derived
-from the 220,492-row merge at `data/processed/external_merged/train_validation.parquet`;
-neither dataset is included in Git). Keep `data.processed_path` pointing to
-the logical Parquet path whether it is a single file or multipart:
+Current presets select external training rows from the 220,492-row real
+preference merge at `data/processed/external_merged/train_validation.parquet`.
+The merge, its downsampled derivative, and the selection CSV are stored outside
+Git. Keep `data.processed_path`
+pointing to the logical Parquet path whether it is a single file or multipart:
 
 - Below 100 MiB: the Zstandard-compressed `.parquet` file.
 - At least 100 MiB: `.parquet.manifest.json` plus `.parquet.parts/`, each volume
@@ -100,15 +100,13 @@ removed before loading.
 
 ## Merged external preferences
 
-Current presets consume Kaggle + complete LMSYS 33K + Arena human + Arena expert,
+The current merge combines Kaggle, LMSYS 33K, Arena human, and Arena expert,
 with HelpSteer3 preference temporarily excluded on 2026-11-17. Data is constructed using the
 [adopted processing rules](recommended-external-data.md#已确定的处理原则).
 All targets are hard labels with integer one-hot winner fields. Rows have equal
-training weight. The merged real-data table retains its natural class
-proportions; current presets consume its
-[non-tie-downsampled derivative](#external-non-tie-downsampling)
-(`data/processed/external_merged_downsampled/train_validation.parquet`) and
-temporarily disable both [scope-specific synthetic ties](#scope-specific-synthetic-ties)
+training weight. Current presets use [ranked external selection](#ranked-external-training-selection)
+and temporarily disable both
+[scope-specific synthetic ties](#scope-specific-synthetic-ties)
 and [tie duplication](#tie-duplication) (`train_supplement_path: null`,
 `build_supplement_path: null`).
 
@@ -164,9 +162,9 @@ unchanged `validation_ids.csv`, pinned `sources.json`, and these audits:
 | `summary.json`, `checksums.sha256` | Counts, identities, integrity checks, and file hashes |
 
 Publication is staged and read back through `TrainingInputLoader`; failed builds
-retain their diagnostics and preserve any prior successful dataset. After
-downsampling, current presets set `validation.validation_fraction` to
-`11495 / 204110` (`0.05631767184361374`) and leave both supplement paths
+retain their diagnostics and preserve any prior successful dataset. Current
+presets set `validation.validation_fraction` to `11495 / 220492`
+(`0.05213341073599042`) and leave both supplement paths
 `null`. Use this dedicated merger to rebuild the combined dataset; `init` and
 `preprocess` rebuild a Kaggle-only split.
 
@@ -271,6 +269,29 @@ After any real-data rebuild, update `validation.validation_fraction` in
 both supplements with the command below. Their source fingerprints must match
 the newly published real table.
 
+### Ranked external training selection
+
+The root and numbered presets set `data.external_rank_path` to
+`data/processed/external_english_rarity_rank.csv`. The CSV supplies
+`rank`, `id`, `source`, and `label`. The loader joins by ID to retained
+external training rows in the merged Parquet, which supplies the conversations.
+For each scope, it uses the corresponding Kaggle rows to derive a tie quota
+(`label=2`) and a combined A/B win quota (`label=0` or `1`). It takes the first
+eligible rows in ascending `rank` within each quota. A quota shortfall or a
+source/label mismatch for an eligible ID stops preparation before training.
+
+| Scope | Kaggle rows | Kaggle ties | External rows | External ties | Total training rows |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Validation training and standalone warmup | 45,982 | 14,230 | 45,982 | 14,230 | 91,964 |
+| Full-data builds and their inline warmup | 57,477 | 17,788 | 57,477 | 17,788 | 114,954 |
+
+Validation and standalone warmup evaluate on the same 11,495 frozen Kaggle
+rows. Full-data builds use those rows for training. Selection runs before
+conversation serialization, leaving the saved split and its configured
+validation fraction intact. Set `data.external_rank_path: null` to train on
+the complete saved partition. Optional tie supplements are applied separately
+when configured.
+
 ### External non-tie downsampling
 
 Executed on 2026-11-18 and published to
@@ -340,13 +361,13 @@ published the filtered rows in their original order to
 `data/processed/external_merged_downsampled/`, and verified 192,615 training
 rows, the same 11,495 frozen Kaggle validation IDs, all 57,477 original Kaggle
 rows and 63,168 ties, and every expected source and length count above via
-`TrainingInputLoader` and `summary.json` / `checksums.sha256`. All current
-presets (`config.yaml` and `configs/1.yaml`–`7.yaml`) point to
+`TrainingInputLoader` and `summary.json` / `checksums.sha256`. The root and
+numbered presets (`config.yaml` and `configs/1.yaml`–`7.yaml`) initially used
 `data/processed/external_merged_downsampled/train_validation.parquet` with
 `validation.validation_fraction: 0.05631767184361374` (`11495 / 204110`),
 `data.train_supplement_path: null`, and `data.build_supplement_path: null`. The
-existing `external_merged` duplicate supplement remains bound to the
-220,492-row input table's fingerprint.
+presets now select ranked training rows from the full merge. The existing `external_merged` duplicate
+supplement remains bound to the 220,492-row input table's fingerprint.
 
 ## Tie duplication
 
@@ -364,8 +385,8 @@ uv run python data/generate_tie_duplicate.py --config config.yaml --scope all
 `--scope train|build|all` defaults to `all`, generating every configured scope,
 and `--target-count` defaults to `7343`.
 Current presets temporarily set both `data.train_supplement_path` and
-`data.build_supplement_path` to `null`. When enabled against the 220,492-row
-`external_merged` snapshot with `data.train_supplement_path` set to
+`data.build_supplement_path` to `null`. The counts below use the 220,492-row
+`external_merged` snapshot with ranked selection disabled and `data.train_supplement_path` set to
 `data/tie_duplicate/external_merged/train/tie_duplicates.parquet` and
 `data.build_supplement_path: null`:
 
@@ -394,8 +415,8 @@ The real-data merger preserves natural labels and counts. Current presets
 temporarily exclude both synthetic ties and tie duplication
 (`data.train_supplement_path: null`, `data.build_supplement_path: null`), and
 the local synthetic-tie files under `data/synthetic_tie/external_merged/context40960/`
-were removed. When enabled,
-training appends independent self-response ties to match the corrected
+were removed. When generated from the complete real table, independent
+self-response ties are sized to match the corrected
 Kaggle-only ratio `17788/57477` (30.9480313865%) as closely as an integer
 addition permits.
 

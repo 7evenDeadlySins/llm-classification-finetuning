@@ -11,10 +11,10 @@ Both SR2 profiles use the saved holdout; validation/build uses
 
 | Mode | Training data | Main output | Does it save a production checkpoint? |
 | --- | --- | --- | --- |
-| `model MODEL` | Saved train partition; evaluate the saved validation partition after each epoch | Best-epoch predictions for frozen SR2, final-epoch predictions for LoRA; `validation.csv`, `metrics.json`, `config.yaml` | No |
-| `model SR2-Qwen3-4B --build` | All original IDs from both partitions | `head[_TAG].pt` | Yes |
-| `model SR2-Qwen3-4B-lora --build` | All original IDs from both partitions | `adapter[_TAG].pt` and `merged[_TAG]/` | Yes |
-| `model warmup --build` | Train partition only, original rows; evaluate train and validation | Completed SR2 warmup cache and both losses | No |
+| `model MODEL` | Selected original train rows with evaluation on the saved validation partition after each epoch | Best-epoch predictions for frozen SR2, final-epoch predictions for LoRA; `validation.csv`, `metrics.json`, `config.yaml` | No |
+| `model SR2-Qwen3-4B --build` | Selected original rows across both partitions | `head[_TAG].pt` | Yes |
+| `model SR2-Qwen3-4B-lora --build` | Selected original rows across both partitions | `adapter[_TAG].pt` and `merged[_TAG]/` | Yes |
+| `model warmup --build` | Selected original train rows with evaluation on train and saved validation rows | Completed SR2 warmup cache and both losses | No |
 
 Full-data model builds have no validation set. Standalone warmup evaluates the
 saved validation partition, including after restoring a cache hit.
@@ -109,7 +109,7 @@ warmup-cache, and result namespace is SR2. See [LoRA training](lora.md).
 
 ## Full-data builds
 
-Build a tagged adapter/head checkpoint and merged backbone on all IDs:
+Build a tagged adapter/head checkpoint and merged backbone:
 
 ```shell
 uv run model SR2-Qwen3-4B-lora --build --checkpoint-tag experiment
@@ -119,12 +119,10 @@ Both active model builds append `data.build_supplement_path` when configured.
 Current presets temporarily set both `data.train_supplement_path` and
 `data.build_supplement_path` to `null` (disabling both
 [tie duplication](data-preparation.md#tie-duplication) and
-[synthetic tie supplements](data-preparation.md#scope-specific-synthetic-ties))
-and use the 204,110-row [non-tie-downsampled real preference dataset](data-preparation.md#external-non-tie-downsampling)
-(192,615 real training rows; 11,495 frozen validation rows; 63,168 real ties,
-30.95%), derived from the 220,492-row HelpSteer3-excluded real merge. Holdout
-validation, standalone warmup, and full-data builds consume only the real
-dataset while preserving the 11,495 frozen validation rows.
+[synthetic tie supplements](data-preparation.md#scope-specific-synthetic-ties)).
+A build trains on all 57,477 Kaggle rows and adds 57,477 ranked external rows,
+with 17,788 ties from each group.
+See [ranked external selection](data-preparation.md#ranked-external-training-selection).
 Build directly from the prepared dataset:
 
 ```shell
@@ -134,8 +132,8 @@ uv run model SR2-Qwen3-4B-lora --config config.yaml --build
 
 Build prepares the saved data, full conversation tokens, and full-data batch
 plan on CPU, then probes both output destinations before configuring CUDA
-or loading model weights. Every original ID from both partitions contributes
-one training row; there is no holdout evaluation during a build. Compatible token, batch,
+or loading model weights. Every selected original ID contributes
+one training row. There is no holdout evaluation during a build. Compatible token, batch,
 and frozen-feature caches are reused. The full-data head-warmup cache is keyed
 by all actual training IDs, their labels, and supplement content when enabled, so a train-partition-only head cache is not
 a complete hit.

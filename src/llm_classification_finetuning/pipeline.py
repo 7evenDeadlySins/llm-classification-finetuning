@@ -55,6 +55,8 @@ class EnsureProcessedDataPipeline:
 		include_build_supplement: bool = False,
 	) -> None:
 		self._storages = [CacheStorage(config.data.processed_path)]
+		if config.data.external_rank_path is not None:
+			self._storages.append(CacheStorage(config.data.external_rank_path))
 		supplement_path = (
 			config.data.build_supplement_path
 			if include_build_supplement
@@ -69,7 +71,7 @@ class EnsureProcessedDataPipeline:
 	def run(
 		self, on_copy: Callable[[Path, Path], None] | None = None
 	) -> tuple[Path, ...]:
-		"""Ensure the real dataset and the supplement selected for this training mode."""
+		"""Ensure the real dataset, configured ranking, and scope-specific supplement."""
 		return tuple(
 			path
 			for storage in self._storages

@@ -54,7 +54,7 @@ def _build(data_source_root: Path | None = None) -> int:
 
 	config_dir = PROJECT_ROOT / CONFIG_DIR
 	failed_tasks: list[str] = []
-	prepared_paths: set[tuple[Path, Path | None]] = set()
+	prepared_paths: set[tuple[Path, Path | None, Path | None]] = set()
 	for model, configs in MODEL_CONFIGS.items():
 		action = "head warmup" if model == "warmup" else "full-data build"
 		for filename in configs:
@@ -72,7 +72,11 @@ def _build(data_source_root: Path | None = None) -> int:
 					if model != "warmup"
 					else app_config.data.train_supplement_path
 				)
-				preparation_key = (processed_path, supplement_path)
+				preparation_key = (
+					processed_path,
+					app_config.data.external_rank_path,
+					supplement_path,
+				)
 				if preparation_key not in prepared_paths:
 					print(
 						f"Preparing processed data for {task} ({config}): {processed_path}",

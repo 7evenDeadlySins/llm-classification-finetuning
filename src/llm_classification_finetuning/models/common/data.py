@@ -11,6 +11,7 @@ import pandas as pd
 from transformers import PreTrainedTokenizerBase
 
 from ...errors import ModelExecutionError
+from .external_selection import RankedExternalSelector
 from .inputs import TrainingInputLoader
 from .supplement import BuildSupplementLoader
 
@@ -141,6 +142,7 @@ class ModelDataRepository:
 		validation_fraction: float | None = None,
 		build_supplement_path: Path | None = None,
 		train_supplement_path: Path | None = None,
+		external_rank_path: Path | None = None,
 	) -> None:
 		self._loader = TrainingInputLoader(
 			processed_path, validation_fraction=validation_fraction
@@ -148,6 +150,7 @@ class ModelDataRepository:
 		self._serializer = serializer
 		self._build_supplement_path = build_supplement_path
 		self._train_supplement_path = train_supplement_path
+		self._external_rank_path = external_rank_path
 
 	@property
 	def serializer_version(self) -> str:
@@ -155,10 +158,15 @@ class ModelDataRepository:
 		return self._serializer.FORMAT_VERSION
 
 	def load(self, *, include_build_supplement: bool = False) -> ModelData:
-		"""Return validated references, canonical texts, and a file fingerprint."""
-		inputs = self._loader.load()
-		data = inputs.data
-		fingerprint = inputs.fingerprint
+		"""Return validated references, canonical texts, and a training-data fingerprint."""
+		inputs = self._loader.load(include_source=self._external_rank_path is not None)
+		selected = inputs
+		if self._external_rank_path is not None:
+			selected = RankedExternalSelector(self._external_rank_path).select(
+				inputs, full_data=include_build_supplement
+			)
+		data = selected.data
+		fingerprint = selected.fingerprint
 		supplement_fingerprint = None
 		scope = "build" if include_build_supplement else "train"
 		supplement_path = (
@@ -176,8 +184,9 @@ class ModelDataRepository:
 			)
 			supplement_fingerprint = supplement.fingerprint
 			fingerprint = BuildSupplementLoader.combined_fingerprint(
-				inputs.fingerprint, supplement.fingerprint
+				fingerprint, supplement.fingerprint
 			)
+		del inputs, selected
 		canonical_texts = tuple(
 			self._serializer.serialize_pair(
 				row_id=int(row.id),

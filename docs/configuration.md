@@ -26,7 +26,8 @@ This process-wide allocator setting requires a fresh process to take effect.
 | --- | --- | --- |
 | `--config PATH` | `./config.yaml` | Selected complete YAML file |
 | `data.raw_dir` | Required YAML path; root preset `data/raw` | Raw competition CSVs |
-| `data.processed_path` | Required YAML `.parquet` path; root preset `data/processed/external_merged_downsampled/train_validation.parquet` | Saved train/validation data, including multipart layout |
+| `data.processed_path` | Required YAML `.parquet` path. Root preset uses `data/processed/external_merged/train_validation.parquet`. | Saved train/validation data, including multipart layout |
+| `data.external_rank_path` | Optional YAML `.csv` path | Ranked external training selection from the saved data |
 | `data.train_supplement_path` | Optional YAML path | Independent supplement (synthetic ties or tie duplicates) for validation training and standalone warmup |
 | `data.build_supplement_path` | Optional YAML path | Independent supplement for full-data model builds |
 | `MODEL_PATH` | Optional environment or `.env`; missing/blank uses native HF settings | Downloaded model/config/tokenizer cache |
@@ -81,6 +82,7 @@ Booleans. Unquoted strings such as `bf16`, `sdpa`, and `cuda:0` are valid.
 | `data.competition` | Nonempty string |
 | `data.raw_dir` | Nonempty path |
 | `data.processed_path` | Nonempty path ending in `.parquet` |
+| `data.external_rank_path` | Nonempty path ending in `.csv` or `null`. Default `null`. Selects external rows to match the Kaggle row and tie counts in the active training scope. The saved Parquet must include `source`. See [ranked external selection](data-preparation.md#ranked-external-training-selection) |
 | `data.train_supplement_path` | Separate `.parquet` path or `null`; default `null`. Appended to training during validation and standalone warmup; frozen validation is unchanged |
 | `data.build_supplement_path` | Separate `.parquet` path or `null`; default `null`. Full-data builds append this artifact instead of the train supplement. Both supplement paths must differ from the real table and use separate, non-nested directories |
 | `validation.random_state` | Integer |
