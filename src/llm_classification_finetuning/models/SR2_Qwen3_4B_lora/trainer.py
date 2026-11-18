@@ -877,8 +877,7 @@ class LoRATrainer:
 				epoch_finished = self._timestamp()
 				progress.finish_stage(epoch_description, emit=early_stopping is None)
 			message = (
-				f"{self._model_key} {mode} {stage.capitalize()} {epoch_description}: "
-				f"progress=100.0% work={epoch_steps}/{epoch_steps} "
+				f"{self._model_label} validation epoch {epoch}: "
 				f"time={format_duration(epoch_finished - epoch_started, milliseconds=True)} "
 				f"train_loss={loss:.6f}"
 				if early_stopping is not None
@@ -913,7 +912,7 @@ class LoRATrainer:
 				early_stopping is not None and unimproved_epochs >= early_stopping
 			)
 			if should_stop:
-				message = f"Early stopping {message} stopped_epoch={epoch}"
+				message = f"Early stopping {message}"
 			if early_stopping is None or epoch % early_stopping == 0 or should_stop:
 				print(message, flush=True)
 			if should_stop:

@@ -79,7 +79,7 @@ def _build(data_source_root: Path | None = None) -> int:
 				)
 				if preparation_key not in prepared_paths:
 					print(
-						f"Preparing processed data for {task} ({config}): {processed_path}",
+						f"Preparing processed data for {task}: {processed_path}",
 						flush=True,
 					)
 					copied = EnsureProcessedDataPipeline(
@@ -87,16 +87,12 @@ def _build(data_source_root: Path | None = None) -> int:
 						project_root=PROJECT_ROOT,
 						source_root=data_source_root,
 						include_build_supplement=model != "warmup",
-					).run(
-						on_copy=lambda source, target: print(
-							f"Copying processed data: {source} -> {target}", flush=True
-						)
-					)
+					).run()
 					prepared_paths.add(preparation_key)
-					print(
-						f"Processed data ready: {processed_path}; copied {len(copied)} files.",
-						flush=True,
-					)
+					if copied:
+						print(
+							f"Processed data files copied: {len(copied):,}", flush=True
+						)
 			except (DataPreparationError, OSError) as error:
 				failed_tasks.append(task)
 				print(

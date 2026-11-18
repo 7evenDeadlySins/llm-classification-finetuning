@@ -22,13 +22,11 @@ Frozen SR2 validation uses early stopping and publishes best-epoch predictions;
 LoRA validation publishes final-epoch predictions. Warmup caches and production
 checkpoints serve different purposes. See [LoRA stages](lora.md#optimization-and-head-warmup).
 
-Both model profiles print `Best validation epoch: E; t: VALUE` when validation
-finishes, selecting the first epoch with the lowest unrounded validation log loss
-among all evaluated epochs, including executed LoRA warmup epochs. The value is
-the fixed absolute-difference coefficient `t`. Full-data builds print
-`Final t: VALUE` from the completed model, including
-when frozen SR2 restores a complete head-cache hit. Both outputs use six decimal
-places. LoRA still publishes final-epoch predictions and validation loss.
+The terminal summary reports the published validation log loss and prediction
+count together. `Best validation epoch` identifies the first epoch with the
+lowest unrounded validation log loss, including any executed LoRA warmup epochs.
+LoRA publishes final-epoch predictions and loss. Validation snapshots record the
+fixed coefficient `t`, and full-data checkpoints store it in the head.
 
 ## Frozen Skywork reward backbone
 
@@ -221,10 +219,10 @@ Frozen SR2 validation prints one epoch summary every `early_stopping` epochs:
 with `early_stopping: 5`, regular summaries appear at epochs `5`, `10`, `15`,
 and so on. There are no intermediate percentage or timed epoch logs. Training
 and validation still execute and record metrics after every epoch. Each summary
-combines the latest epoch's completed work, current and best validation loss,
-`best_epoch`, and the consecutive non-improvement count against `early_stopping`.
-The stopping epoch always prints one final summary, even between regular log
-boundaries, prefixed with `Early stopping` and including `stopped_epoch`.
+reports the epoch, training loss, current and best validation loss, `best_epoch`,
+and the consecutive non-improvement count against `early_stopping`. The stopping
+epoch always prints one final summary prefixed with `Early stopping`, even
+between regular log boundaries.
 Stopping on a regular log boundary prints that summary only once.
 
 These validation logs use `HH:MM:SS.mmm` durations. The completion summary gives

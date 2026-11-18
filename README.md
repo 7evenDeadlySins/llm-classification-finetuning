@@ -56,8 +56,8 @@ head. LoRA joint training and validation use the same pooling as frozen SR2
 and head warmup.
 The tie formula uses a fixed absolute-difference coefficient `t`. The top-level
 YAML field `t` applies to both profiles and warmup. If omitted, the parser uses
-`2φ + 1 = 2 + √5 ≈ 4.236068`, where `φ` is the golden ratio. Validation and build
-summaries print the effective value.
+`2φ + 1 = 2 + √5 ≈ 4.236068`, where `φ` is the golden ratio. Validation snapshots
+record the effective value, and built checkpoints store it in the head.
 The frozen model has independent training settings and shares
 compatible head/feature caches with LoRA warmup and the separate `warmup --build`
 selector. Retired Qwen profiles and

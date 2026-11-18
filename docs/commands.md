@@ -134,8 +134,8 @@ without being replaced. Successfully prepared paths are reused within the batch.
 
 Data-preparation failures skip that task and continue the batch. The log includes
 the YAML/model and missing local/source paths, and the final status is nonzero if
-any task fails. Preparation and copying use the same streamed validation log as
-the child model commands.
+any task fails. The batch log streams data preparation and child model output.
+When preparation copies files, it reports the total file count for that task.
 
 ## Batch builds
 
@@ -175,7 +175,8 @@ directory. Single Parquet files and manifest-plus-volume artifacts are supported
 with only missing files or wrong-sized volumes copied. Successfully prepared
 paths are shared within the batch and checked again after a failed model task.
 Preparation failures are recorded in the build log, skip the affected task, and
-contribute to the failure summary. The script does not run `init` or `preprocess`.
+contribute to the failure summary. Successful copies are logged as one file count
+per task. The script does not run `init` or `preprocess`.
 
 The batch script does not add `--checkpoint-tag`. Multiple configs for the same
 model replace the default `head.pt`, or `adapter.pt` and `merged/` outputs in sequence. Use the
