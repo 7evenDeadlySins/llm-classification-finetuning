@@ -58,14 +58,6 @@ EXTERNAL_SOURCES = (
 		("data/train-00000-of-00001.parquet",),
 		5128,
 	),
-	ExternalSource(
-		"helpsteer3",
-		"nvidia/HelpSteer3",
-		"f6d145777bcbde96137596340fab89793acd1031",
-		4,
-		("preference/train.jsonl.gz", "preference/validation.jsonl.gz"),
-		40476,
-	),
 )
 
 

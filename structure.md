@@ -136,7 +136,7 @@ Package `__init__.py` files expose intended public interfaces unless noted.
 | `data/downloader.py` | Missing Kaggle training CSV download and single-file ZIP normalization |
 | `data/external.py` | Pinned official dataset identities, download/reuse and LFS checksum verification, raw source lock manifest |
 | `external_pipeline.py` | `MergeExternalDataPipeline`: frozen Kaggle baseline, conversion/voting orchestration, complete branch length statistics, whole-battle model-context exclusion without truncation, staged audits, publication and readback checks |
-| `preprocess/external.py` | Strict text-only source adapters, restricted NumPy container-representation decoder, Arena history alignment, HelpSteer sign labels and source vote identities |
+| `preprocess/external.py` | Strict text-only source adapters, restricted NumPy container-representation decoder, Arena history alignment, hard-label conversion, and source vote identities |
 | `preprocess/deduplication.py` | `ExternalBattleDeduplicator`: complete-prompt/unordered-pair identities, validation exclusion, optional independent hard-vote merging, conflicting-vote diagnostics and representative/status/count audits |
 | `preprocess/splits.py` | Exact-response tie correction before labels/prompt hashes, grouped class quotas, balance orchestration, original-only integrity summaries, and processed publication |
 | `preprocess/synthetic_tie.py` | Deterministic train/build self-response tie generation with dynamic counts, exact rational win-rate adjustment, full source/selection/replacement audits with bounded-volume streaming, and staged publication; invoked by `data/generate_synthetic_tie.py` |

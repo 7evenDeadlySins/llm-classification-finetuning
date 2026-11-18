@@ -100,8 +100,8 @@ removed before loading.
 
 ## Merged external preferences
 
-The current merge combines Kaggle, LMSYS 33K, Arena human, and Arena expert,
-with HelpSteer3 preference temporarily excluded on 2026-11-17. Data is constructed using the
+The current merge combines Kaggle, LMSYS 33K, Arena human, and Arena expert.
+Data is constructed using the
 [adopted processing rules](recommended-external-data.md#已确定的处理原则).
 All targets are hard labels with integer one-hot winner fields. Rows have equal
 training weight. Current presets use [ranked external selection](#ranked-external-training-selection)
@@ -110,15 +110,11 @@ and temporarily disable both
 and [tie duplication](#tie-duplication) (`train_supplement_path: null`,
 `build_supplement_path: null`).
 
-The standard merger rebuilds the full pinned source set, including HelpSteer3:
+Rebuild the pinned source set with:
 
 ```powershell
 uv run python data/merge_external_data.py --config config.yaml
 ```
-
-The current temporary exclusion leaves the source registry and adapters intact.
-To reproduce this snapshot, use the [temporary source-selection procedure](#temporarily-excluding-helpsteer3)
-instead of the standard command above.
 
 `--baseline-path` defaults to `data/processed/lmsys33k/train_validation.parquet`;
 `--output-dir` defaults to `data/processed/external_merged`. The baseline's
@@ -142,9 +138,9 @@ All current preset model and warmup `max_length` values are 40,960.
 Only the model configuration and tokenizer are loaded; no GPU or model weights
 are required.
 
-Kaggle IDs stay unchanged. LMSYS, Arena human, Arena expert, and HelpSteer3 use
-ID segments `1`, `2`, `3`, and `4` respectively: `segment * 2**32 + source_row_index`.
-HelpSteer3 indexes train then validation consecutively. Provenance includes
+Kaggle IDs stay unchanged. LMSYS, Arena human, and Arena expert use
+ID segments `1`, `2`, and `3` respectively: `segment * 2**32 + source_row_index`.
+Provenance includes
 `source`, `source_id`, `source_row_index`, `source_split`, `source_winner`, and
 `vote_id`; `original_label` and `tie_corrected` record conversion before vote merging.
 
@@ -168,15 +164,13 @@ presets set `validation.validation_fraction` to `11495 / 220492`
 `null`. Use this dedicated merger to rebuild the combined dataset; `init` and
 `preprocess` rebuild a Kaggle-only split.
 
-The 2026-11-17 context-filtered build without HelpSteer3 contains 220,492 rows: 208,997 train and
+The 2026-11-17 context-filtered build contains 220,492 rows: 208,997 train and
 the frozen 11,495 validation rows (tie share `63168 / 220492`, 28.6487%; train tie share `59610 / 208997`, 28.5219%). Its full-table validation fraction is
 `0.05213341073599042`. It excludes 102 over-context training battles (78 Arena
 human and 24 Arena expert) and retains 1,584 rows above the old token ceiling.
 The maximum retained complete branch is 40,953 tokens; the maximum A+B total
 is 78,827, below the current 147,456-token joint training budget. All Kaggle
-rows and validation IDs are unchanged. The previous real-data snapshot with
-HelpSteer3 is preserved in a sibling `external_merged.backup-with-helpsteer3-*`
-directory. The two superseded supplements were removed before regeneration.
+rows and validation IDs are unchanged.
 
 | Representative source | Train rows | Validation rows |
 | --- | ---: | ---: |
@@ -184,7 +178,6 @@ directory. The two superseded supplements were removed before regeneration.
 | LMSYS | 24,227 | 0 |
 | Arena human | 135,440 | 0 |
 | Arena expert | 3,348 | 0 |
-| HelpSteer3 preference (temporarily excluded) | 0 | 0 |
 
 Source counts identify retained representatives; cross-source votes remain in
 the audits and receive equal weight during label selection. The build excludes
@@ -245,24 +238,6 @@ over other external sources.
 The optional `merge_votes=False` default retains the older first-occurrence API
 for callers that only require battle filtering. The dedicated merger always
 enables vote merging. Historical Kaggle/LMSYS snapshots remain available.
-
-### Temporarily excluding HelpSteer3
-
-The current snapshot was rebuilt from the three remaining external releases,
-excluding HelpSteer3 before conversion and independent-vote merging. It removes
-25,657 previously retained HelpSteer3 rows. The raw source lock and downloaded
-HelpSteer3 files remain unchanged; the published `sources.json` lists only the
-active sources, and `summary.json` records `temporarily_excluded_sources`.
-No preprocessing or model source code was changed.
-
-To select the same sources in a one-off Python process, filter
-`llm_classification_finetuning.external_pipeline.EXTERNAL_SOURCES` to entries
-whose `name != "helpsteer3"`. Wrap `ExternalSourceDownloader.ensure_available`
-so its verified manifest also omits HelpSteer3 from `sources` and `files`, then
-run the existing `MergeExternalDataPipeline` with the frozen LMSYS33K baseline.
-Record the exclusion in the merge summary and generated README before checksums
-are written. The unmodified standard merger command above restores the full
-source set, including HelpSteer3.
 
 After any real-data rebuild, update `validation.validation_fraction` in
 `config.yaml` and all complete presets to `11495 / total_rows`, then regenerate
@@ -452,8 +427,7 @@ train/build directories are not used by current configurations.
 | Model build and inline build warmup | 220,492 / 63,168 | 7,342 | 227,834 / 70,510 | 3.2225216605% | 30.9479708911% |
 
 Relative to the real rows before supplementation, the additions are 3.5134475614%
-for train and 3.3298260254% for build. Each scope adds 9,418 fewer rows than the
-previous HelpSteer3-inclusive snapshot.
+for train and 3.3298260254% for build.
 
 For original count `N`, tie count `T` and target `p`, the ideal addition is
 `(p*N - T)/(1-p)`. Compare the resulting tie-share errors of the adjacent

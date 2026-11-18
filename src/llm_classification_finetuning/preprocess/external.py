@@ -239,33 +239,7 @@ class ExternalConversationConverter:
 
 	def convert(self, row: dict, index: int, source_split: str) -> dict:
 		try:
-			if self.source.name == "helpsteer3":
-				context = row["context"]
-				if (
-					not isinstance(context, list)
-					or not context
-					or len(context) % 2 != 1
-				):
-					raise ConversationExclusion(
-						"excluded_structure",
-						"HelpSteer context must end with a user message.",
-					)
-				a = self._messages(
-					[*context, {"role": "assistant", "content": row["response1"]}]
-				)
-				b = self._messages(
-					[*context, {"role": "assistant", "content": row["response2"]}]
-				)
-				score = row["overall_preference"]
-				if type(score) is not int or score not in range(-3, 4):
-					raise ValueError("Invalid overall_preference.")
-				label = 0 if score < 0 else 1 if score > 0 else 2
-				source_id = hashlib.sha256(
-					canonical_json(row).encode("utf-8")
-				).hexdigest()
-				vote_id = f"helpsteer3:{source_id}"
-				raw_label = str(score)
-			elif self.source.name == "lmsys":
+			if self.source.name == "lmsys":
 				a, b = (
 					self._messages(row[key])
 					for key in ("conversation_a", "conversation_b")
@@ -298,8 +272,8 @@ class ExternalConversationConverter:
 			prompt = canonical_json(prompts)
 			return {
 				"id": self.source.id_segment * 2**32 + index,
-				"model_a": row.get("model_a", "response1"),
-				"model_b": row.get("model_b", "response2"),
+				"model_a": row.get("model_a"),
+				"model_b": row.get("model_b"),
 				"prompt": prompt,
 				"response_a": canonical_json(answers_a),
 				"response_b": canonical_json(answers_b),

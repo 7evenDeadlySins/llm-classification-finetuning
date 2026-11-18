@@ -1,5 +1,5 @@
 # Match ranked external preferences to the Kaggle training rows in each scope.
-# HelpSteer3 preference, synthetic ties, and tie duplication are temporarily excluded.
+# Synthetic ties and tie duplication are temporarily excluded.
 # Counts, source revisions and checksums: data/processed/external_merged/summary.json
 
 data:

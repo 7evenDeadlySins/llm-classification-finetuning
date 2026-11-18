@@ -27,6 +27,12 @@ With the current ranking, validation training and standalone warmup add
 rows** to all **57,477 Kaggle rows**. See
 [ranked external selection](docs/data-preparation.md#ranked-external-training-selection).
 
+The [LMSYS33K preset](configs/lmsys33k.yaml) uses the original Kaggle + LMSYS
+snapshot with 1,013 real Arena ties added in English rarity rank order. Both
+validation training (67,045 rows) and full-data builds (78,540 rows) reach a
+30.95% tie share. The validation workflow evaluates on the same 11,495 frozen
+Kaggle rows. See the [LMSYS33K data notes](data/processed/lmsys33k/README.md).
+
 The merge combines hard labels from Kaggle, LMSYS, Arena human, and Arena
 expert. Model and warmup limits are **40,960 tokens**. Rebuild and audit
 instructions are in [merged external preferences](docs/data-preparation.md#merged-external-preferences).

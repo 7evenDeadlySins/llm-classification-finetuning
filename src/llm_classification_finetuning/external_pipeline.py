@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 import shutil
@@ -340,9 +339,7 @@ class MergeExternalDataPipeline:
 						"source_row_index": index,
 						"source_split": split,
 						"source_id": raw.get("id", raw.get("question_id")),
-						"source_winner": str(
-							raw.get("winner", raw.get("overall_preference"))
-						),
+						"source_winner": str(raw.get("winner")),
 						"status": "converted",
 						"detail": "",
 					}
@@ -377,28 +374,21 @@ class MergeExternalDataPipeline:
 
 	@staticmethod
 	def _source_rows(path: Path, source: str):
-		if path.name.endswith(".jsonl.gz"):
-			with gzip.open(path, "rt", encoding="utf-8") as stream:
-				for line in stream:
-					yield json.loads(line)
-		else:
-			columns = [
-				"model_a",
-				"model_b",
-				"winner",
-				"conversation_a",
-				"conversation_b",
-				"language",
-			]
-			columns += (
-				["question_id", "judge", "tstamp"]
-				if source == "lmsys"
-				else ["id", "evaluation_order", "full_conversation"]
-			)
-			for batch in pq.ParquetFile(path).iter_batches(
-				batch_size=512, columns=columns
-			):
-				yield from batch.to_pylist()
+		columns = [
+			"model_a",
+			"model_b",
+			"winner",
+			"conversation_a",
+			"conversation_b",
+			"language",
+		]
+		columns += (
+			["question_id", "judge", "tstamp"]
+			if source == "lmsys"
+			else ["id", "evaluation_order", "full_conversation"]
+		)
+		for batch in pq.ParquetFile(path).iter_batches(batch_size=512, columns=columns):
+			yield from batch.to_pylist()
 
 	def _lengths(self, data: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 		cache = TokenizationCache.from_pretrained(
@@ -521,7 +511,7 @@ class MergeExternalDataPipeline:
 	def _write_readme(self, stage: Path) -> None:
 		(stage / "README.md").write_text(
 			"# Merged real human preference data\n\n"
-			"Kaggle + complete LMSYS 33K + Arena human + Arena expert + HelpSteer3 preference. "
+			"Kaggle + complete LMSYS 33K + Arena human + Arena expert. "
 			"The 11,495 Kaggle validation IDs and all Kaggle rows are frozen. External rows are train-only. "
 			"All labels are hard one-hot targets; rows have equal weight. Independent votes use the unique "
 			"highest-count class after A/B alignment; highest-count ties are excluded. Kaggle duplicate battles "

@@ -1,5 +1,5 @@
 # Match ranked external preferences to the Kaggle training rows in each scope.
-# HelpSteer3 preference, synthetic ties, and tie duplication are temporarily excluded.
+# Synthetic ties and tie duplication are temporarily excluded.
 # Counts, source revisions and checksums: data/processed/external_merged/summary.json
 
 data:
@@ -71,7 +71,7 @@ SR2_Qwen3_4B_lora:
   extraction_budget: 114688
   learning_rate: 0.0001
   min_lr_ratio: 0.0
-  lr_decay_delay_epochs: 0
+  lr_decay_delay_epochs: 1
   hidden_size: 128
   weight_decay: 0.01
   dropout: 0.1
