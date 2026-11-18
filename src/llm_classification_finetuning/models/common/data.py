@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 from transformers import PreTrainedTokenizerBase
 
@@ -14,6 +17,9 @@ from ...errors import ModelExecutionError
 from .external_selection import RankedExternalSelector
 from .inputs import TrainingInputLoader
 from .supplement import BuildSupplementLoader
+
+if TYPE_CHECKING:
+	from .token_cache import TokenizationCache
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +56,23 @@ class ConversationSerializer:
 			raise ModelExecutionError(
 				f"Could not prepare the conversation chat template: {error}"
 			) from error
+
+	@property
+	def chat_template_sha256(self) -> str:
+		return hashlib.sha256(self._chat_template.encode("utf-8")).hexdigest()
+
+	def count_tokens(self, texts: Sequence[str]) -> np.ndarray:
+		"""Count complete serialized inputs when no shared token cache is supplied."""
+		encoded = self._tokenizer(
+			list(texts),
+			padding=False,
+			truncation=False,
+			add_special_tokens=False,
+			return_attention_mask=False,
+			return_token_type_ids=False,
+			verbose=False,
+		)["input_ids"]
+		return np.fromiter(map(len, encoded), dtype=np.int64, count=len(texts))
 
 	def serialize_pair(
 		self,
@@ -143,6 +166,7 @@ class ModelDataRepository:
 		build_supplement_path: Path | None = None,
 		train_supplement_path: Path | None = None,
 		external_rank_path: Path | None = None,
+		token_cache: TokenizationCache | None = None,
 	) -> None:
 		self._loader = TrainingInputLoader(
 			processed_path, validation_fraction=validation_fraction
@@ -151,6 +175,7 @@ class ModelDataRepository:
 		self._build_supplement_path = build_supplement_path
 		self._train_supplement_path = train_supplement_path
 		self._external_rank_path = external_rank_path
+		self._token_cache = token_cache
 
 	@property
 	def serializer_version(self) -> str:
@@ -163,7 +188,9 @@ class ModelDataRepository:
 		selected = inputs
 		if self._external_rank_path is not None:
 			selected = RankedExternalSelector(self._external_rank_path).select(
-				inputs, full_data=include_build_supplement
+				inputs,
+				full_data=include_build_supplement,
+				load_token_totals=self._external_token_totals,
 			)
 		data = selected.data
 		fingerprint = selected.fingerprint
@@ -187,7 +214,49 @@ class ModelDataRepository:
 				fingerprint, supplement.fingerprint
 			)
 		del inputs, selected
-		canonical_texts = tuple(
+		return ModelData(
+			reference=data.loc[:, ["id", "label", "split", "is_swapped"]]
+			.copy()
+			.reset_index(drop=True),
+			canonical_texts=self._serialize(data),
+			fingerprint=fingerprint,
+			supplement_fingerprint=supplement_fingerprint,
+		)
+
+	def _external_token_totals(self, rows: pd.DataFrame, fingerprint: str) -> pd.Series:
+		cache = self._token_cache
+		if cache is not None:
+			stored = self._loader.load_token_totals(
+				fingerprint,
+				tokenizer_fingerprint=cache.tokenizer_key,
+				serializer_version=self.serializer_version,
+				chat_template_sha256=self._serializer.chat_template_sha256,
+			)
+			if stored is not None:
+				matched = stored.reindex(rows["id"])
+				if matched.notna().all():
+					return matched
+
+		count_tokens = (
+			cache.count_tokens if cache is not None else self._serializer.count_tokens
+		)
+		batch_size = 4096 if cache is not None else 256
+		totals = np.empty(len(rows), dtype=np.int64)
+		for start in range(0, len(rows), batch_size):
+			pairs = self._serialize(rows.iloc[start : start + batch_size])
+			texts = [
+				text for pair in pairs for text in (pair.response_a, pair.response_b)
+			]
+			lengths = count_tokens(texts).reshape(-1, 2)
+			if (lengths <= 0).any():
+				raise ModelExecutionError(
+					"Complete branch token counts must be positive."
+				)
+			totals[start : start + len(pairs)] = lengths.sum(axis=1, dtype=np.int64)
+		return pd.Series(totals, index=rows["id"])
+
+	def _serialize(self, data: pd.DataFrame) -> tuple[PairwiseText, ...]:
+		return tuple(
 			self._serializer.serialize_pair(
 				row_id=int(row.id),
 				prompt_value=row.prompt,
@@ -195,12 +264,4 @@ class ModelDataRepository:
 				response_b_value=row.response_b,
 			)
 			for row in data.itertuples(index=False)
-		)
-		return ModelData(
-			reference=data.loc[:, ["id", "label", "split", "is_swapped"]]
-			.copy()
-			.reset_index(drop=True),
-			canonical_texts=canonical_texts,
-			fingerprint=fingerprint,
-			supplement_fingerprint=supplement_fingerprint,
 		)

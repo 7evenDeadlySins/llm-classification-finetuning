@@ -618,6 +618,7 @@ class LoRATrainingBatchRepository:
 				build_supplement_path=config.data.build_supplement_path,
 				train_supplement_path=config.data.train_supplement_path,
 				external_rank_path=config.data.external_rank_path,
+				token_cache=token_cache,
 			)
 			data = repository.load(include_build_supplement=include_build_supplement)
 			return cls(

@@ -129,8 +129,11 @@ Both notebooks default `DRIVE_DATA_ROOT` to
 project root: the merged real preference artifact belongs at
 `<DRIVE_DATA_ROOT>/data/processed/external_merged/train_validation.parquet`, or its
 `.manifest.json` and referenced `.parts/` volumes. Place the ranking CSV at
-`<DRIVE_DATA_ROOT>/data/processed/external_english_rarity_rank.csv`. Change the
-settings cell to use a different mirror root.
+`<DRIVE_DATA_ROOT>/data/processed/external_english_rarity_rank.csv`. For fast
+token budgeting, keep `summary.json` and `token_stats.parquet` beside the
+merged Parquet. The batch scripts pick up these optional files when restoring
+required data from the mirror. Change the settings cell to use a different
+mirror root.
 
 Both batch scripts resolve each selected YAML's `data.processed_path` and
 `data.external_rank_path` from `PROJECT_DIR`. Complete local artifacts are

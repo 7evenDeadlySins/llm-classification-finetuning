@@ -275,20 +275,30 @@ The root and numbered presets set `data.external_rank_path` to
 `data/processed/external_english_rarity_rank.csv`. The CSV supplies
 `rank`, `id`, `source`, and `label`. The loader joins by ID to retained
 external training rows in the merged Parquet, which supplies the conversations.
-For each scope, it uses the corresponding Kaggle rows to derive a tie quota
-(`label=2`) and a combined A/B win quota (`label=0` or `1`). It takes the first
-eligible rows in ascending `rank` within each quota. A quota shortfall or a
-source/label mismatch for an eligible ID stops preparation before training.
+Each scope uses the sum of complete A and B branch tokens across its Kaggle
+training rows as the external token budget. For `n` external rows, the number
+of ties (`label=2`) is `n × Kaggle tie share`, rounded to the nearest integer
+with halves rounded up. The remaining rows are A/B wins (`label=0` or `1`).
+Each group contributes its first eligible rows in ascending `rank`. Selection
+picks the `n` whose token total is closest to the budget, choosing the smaller
+`n` when the differences are equal. Preparation stops if the eligible ranked
+rows cannot reach the budget at that tie share or if an eligible ID's source
+or label differs from the processed dataset.
 
-| Scope | Kaggle rows | Kaggle ties | External rows | External ties | Total training rows |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Validation training and standalone warmup | 45,982 | 14,230 | 45,982 | 14,230 | 91,964 |
-| Full-data builds and their inline warmup | 57,477 | 17,788 | 57,477 | 17,788 | 114,954 |
+Token lengths include both serialized chat branches, without padding or
+truncation. The loader reuses `token_stats.parquet` when the merge summary
+matches the saved dataset, tokenizer, and chat format. Otherwise it counts
+tokens with the active model tokenizer and the shared length cache.
+
+| Scope | Kaggle rows | Kaggle tokens | External rows | External ties | External tokens | Total training rows |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Validation training and standalone warmup | 45,982 | 35,856,134 | 6,658 | 2,060 | 35,865,470 | 52,640 |
+| Full-data builds and their inline warmup | 57,477 | 44,873,727 | 8,934 | 2,765 | 44,865,610 | 66,411 |
 
 Validation and standalone warmup evaluate on the same 11,495 frozen Kaggle
 rows. Full-data builds use those rows for training. Selection runs before
-conversation serialization, leaving the saved split and its configured
-validation fraction intact. Set `data.external_rank_path: null` to train on
+building the final model inputs. The configured validation fraction describes
+the full saved split. Set `data.external_rank_path: null` to train on
 the complete saved partition. Optional tie supplements are applied separately
 when configured.
 

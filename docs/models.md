@@ -120,8 +120,9 @@ Current presets temporarily set both `data.train_supplement_path` and
 `data.build_supplement_path` to `null` (disabling both
 [tie duplication](data-preparation.md#tie-duplication) and
 [synthetic tie supplements](data-preparation.md#scope-specific-synthetic-ties)).
-A build trains on all 57,477 Kaggle rows and adds 57,477 ranked external rows,
-with 17,788 ties from each group.
+A build trains on all 57,477 Kaggle rows and targets the same token volume
+from ranked external rows. The current ranking yields 8,934 external rows,
+including 2,765 ties.
 See [ranked external selection](data-preparation.md#ranked-external-training-selection).
 Build directly from the prepared dataset:
 

@@ -19,11 +19,12 @@ For Colab and the local VS Code notebook workflow, see
 [Kaggle submission notebook](docs/kaggle-submission.md).
 
 The default presets select external training rows from the **220,492-row** real
-preference merge using `external_english_rarity_rank.csv`. External rows match
-the Kaggle row count and tie count in each training scope. Validation training
-and standalone warmup use **91,964 training rows** and the **11,495 frozen
-Kaggle validation rows**. Full-data builds use **114,954 training rows**,
-including both Kaggle partitions. See
+preference merge using `external_english_rarity_rank.csv`. The selection matches
+the Kaggle training token volume and preserves its tie share by row count.
+With the current ranking, validation training and standalone warmup add
+**6,658 external rows** to **45,982 Kaggle training rows** and evaluate on the
+**11,495 frozen Kaggle validation rows**. Full-data builds add **8,934 external
+rows** to all **57,477 Kaggle rows**. See
 [ranked external selection](docs/data-preparation.md#ranked-external-training-selection).
 
 The merge combines hard labels from Kaggle, LMSYS, Arena human, and Arena

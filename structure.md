@@ -49,7 +49,7 @@ The saved split included in Git can enter this flow without downloading raw data
 Standalone warmup is optional; inline LoRA runs create/reuse their compatible
 warmup state. Validation does not save production checkpoints. Builds use Kaggle
 IDs from both partitions. Current presets select external rows from the saved
-merge to match the active Kaggle row and tie counts. See
+merge to match the active Kaggle token volume and tie share by row count. See
 [ranked external selection](docs/data-preparation.md#ranked-external-training-selection).
 The presets set both `data.train_supplement_path` and
 `data.build_supplement_path` to `null` (both `tie_duplicate` and `synthetic_tie`
@@ -95,7 +95,8 @@ belong in [data preparation](docs/data-preparation.md#merged-external-preference
 Both batch scripts load each selected config from the project-root cwd and ensure
 its saved data, any ranking CSV, and its scope-specific supplement before
 launching the model child. `--data-source-root` can fill missing files from a
-project mirror.
+project mirror, including optional merge token statistics when restoring ranked
+training data.
 Successful data preparations are shared by resolved path within the batch;
 preparation failures use the existing task log and failure summary.
 
@@ -111,8 +112,8 @@ to the batch script; complete local processed data bypasses that source.
 T4 x2, Python 3.13+, offline inference after upload-time dependency setup). It sits
 outside the package and the `model` CLI: it reads the build's
 `adapter.pt` head and `merged/` backbone and writes `submission.csv`. It duplicates the
-SR2 head and the conversation serializer, so changes to
-`models/SR2_Qwen3_4B_lora/heads.py` or `models/common/data.py` must be mirrored there.
+SR2 head and the conversation serializer. Mirror changes to the head or the
+conversation serialization format there.
 Behavior belongs in [Kaggle submission](docs/kaggle-submission.md).
 
 ## Package map
@@ -177,8 +178,8 @@ with the current SR2 head and warmup feature identities, rather than legacy MLP 
 | --- | --- |
 | `contracts.py` | Execution modes, pipeline interface, and validation/build/warmup result summaries, including best-validation epoch/t, final build t, optional executed warmup/joint epoch counts and merged-backbone path for builds |
 | `supplement.py` | Scope-specific supplement loading (synthetic ties and real-row tie duplicates), calculated counts, source fingerprint/provenance and validation-isolation checks, independent historical-score validation, and composite training fingerprints |
-| `inputs.py` | Processed table loading, strict original-only split/ID validation, multipart reads, and reconstructed source fingerprints |
-| `external_selection.py` | CSV rank validation, eligible-ID matching, scope-specific Kaggle tie and non-tie quotas, and selected-data fingerprinting |
+| `inputs.py` | Processed table loading, strict original-only split/ID validation, multipart reads, reconstructed source fingerprints, and verified merge token statistics |
+| `external_selection.py` | CSV rank validation, eligible-ID matching, scope-specific token budgets with the Kaggle tie share by row count, and selected-data fingerprinting |
 | `data.py` | Tokenizer-injected official chat-template serialization and pairwise training repository |
 | `hardware.py` | CUDA/precision validation, single-GPU placement, isolated phase intervals with cross-epoch allocator maxima, and reset-safe global peaks |
 | `backbone.py` | Local weight/configuration content fingerprints for caches |

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +33,7 @@ class TrainingInputLoader:
 		"group_id",
 		"is_swapped",
 	)
+	TOKEN_STATS_FILES = ("summary.json", "token_stats.parquet")
 
 	def __init__(
 		self, processed_path: Path, *, validation_fraction: float | None = None
@@ -79,6 +81,66 @@ class TrainingInputLoader:
 			) from error
 		self.validate(data, validation_fraction=self._validation_fraction)
 		return TrainingInputs(data=data, fingerprint=fingerprint)
+
+	def load_token_totals(
+		self,
+		fingerprint: str,
+		*,
+		tokenizer_fingerprint: str,
+		serializer_version: str,
+		chat_template_sha256: str,
+	) -> pd.Series | None:
+		"""Read complete pair lengths when the merge audit matches these inputs."""
+		summary_storage, stats_storage = (
+			CacheStorage(self._processed_path.with_name(name))
+			for name in self.TOKEN_STATS_FILES
+		)
+		if not summary_storage.exists() or not stats_storage.exists():
+			return None
+		identity = {
+			"tokenizer_fingerprint": tokenizer_fingerprint,
+			"serializer_version": serializer_version,
+			"chat_template_sha256": chat_template_sha256,
+			"add_special_tokens": False,
+			"truncation": False,
+			"padding": False,
+		}
+		try:
+			with summary_storage.open("r") as session:
+				summary = json.loads(session.path.read_text(encoding="utf-8"))
+			if summary.get("processed_reconstructed_sha256") != fingerprint or any(
+				summary.get("tokenizer", {}).get(name) != value
+				for name, value in identity.items()
+			):
+				return None
+			expected = (
+				summary.get("artifacts", {})
+				.get(stats_storage.path.name, {})
+				.get("sha256")
+			)
+			with stats_storage.open("r") as session:
+				if _sha256(session.path) != expected:
+					raise ValueError(
+						"token statistics checksum does not match the merge summary"
+					)
+				stats = pd.read_parquet(
+					session.path, columns=["id", "tokens_a", "tokens_b", "retained"]
+				)
+			retained = stats.loc[stats["retained"]].set_index("id")
+			lengths = retained[["tokens_a", "tokens_b"]]
+			if (
+				not retained.index.is_unique
+				or lengths.isna().any().any()
+				or not lengths.gt(0).all().all()
+			):
+				raise ValueError(
+					"expected one pair of positive token counts per retained ID"
+				)
+		except (OSError, ValueError, AttributeError, KeyError, TypeError) as error:
+			raise ModelExecutionError(
+				f"Could not read token statistics {stats_storage.path}: {error}"
+			) from error
+		return lengths.sum(axis=1).astype("int64")
 
 	@staticmethod
 	def validate(

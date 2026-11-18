@@ -9,7 +9,7 @@ from pathlib import Path
 from .config import AppConfig
 from .data import CompetitionDataDownloader, DownloadResult
 from .errors import DataPreparationError
-from .models.common import CacheStorage
+from .models.common import CacheStorage, TrainingInputLoader
 from .preprocess import SplitPreparationResult, SplitPreprocessor
 
 
@@ -55,8 +55,13 @@ class EnsureProcessedDataPipeline:
 		include_build_supplement: bool = False,
 	) -> None:
 		self._storages = [CacheStorage(config.data.processed_path)]
+		self._token_stats_storages: tuple[CacheStorage, ...] = ()
 		if config.data.external_rank_path is not None:
 			self._storages.append(CacheStorage(config.data.external_rank_path))
+			self._token_stats_storages = tuple(
+				CacheStorage(config.data.processed_path.with_name(name))
+				for name in TrainingInputLoader.TOKEN_STATS_FILES
+			)
 		supplement_path = (
 			config.data.build_supplement_path
 			if include_build_supplement
@@ -71,17 +76,26 @@ class EnsureProcessedDataPipeline:
 	def run(
 		self, on_copy: Callable[[Path, Path], None] | None = None
 	) -> tuple[Path, ...]:
-		"""Ensure the real dataset, configured ranking, and scope-specific supplement."""
-		return tuple(
+		"""Ensure required data and pick up token statistics when using a mirror."""
+		copied = tuple(
 			path
 			for storage in self._storages
 			for path in self._ensure(storage, on_copy)
+		)
+		if not copied:
+			return copied
+		return copied + tuple(
+			path
+			for storage in self._token_stats_storages
+			for path in self._ensure(storage, on_copy, optional=True)
 		)
 
 	def _ensure(
 		self,
 		storage: CacheStorage,
 		on_copy: Callable[[Path, Path], None] | None,
+		*,
+		optional: bool = False,
 	) -> tuple[Path, ...]:
 		source_path: Path | None = None
 		try:
@@ -98,6 +112,8 @@ class EnsureProcessedDataPipeline:
 			try:
 				relative_path = storage.path.relative_to(self._project_root)
 			except ValueError as error:
+				if optional:
+					return ()
 				raise DataPreparationError(
 					f"Missing or wrong-sized processed data: {missing_paths}. "
 					f"Cannot map {storage.path} to the source root: "
@@ -107,7 +123,10 @@ class EnsureProcessedDataPipeline:
 			if not source_root.is_absolute():
 				source_root = self._project_root / source_root
 			source_path = source_root / relative_path
-			return storage.copy_missing_from(CacheStorage(source_path), on_copy=on_copy)
+			source = CacheStorage(source_path)
+			if optional and source.missing_components():
+				return ()
+			return storage.copy_missing_from(source, on_copy=on_copy)
 		except OSError as error:
 			source_detail = f" from {source_path}" if source_path is not None else ""
 			raise DataPreparationError(

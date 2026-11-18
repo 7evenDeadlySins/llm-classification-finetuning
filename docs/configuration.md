@@ -82,7 +82,7 @@ Booleans. Unquoted strings such as `bf16`, `sdpa`, and `cuda:0` are valid.
 | `data.competition` | Nonempty string |
 | `data.raw_dir` | Nonempty path |
 | `data.processed_path` | Nonempty path ending in `.parquet` |
-| `data.external_rank_path` | Nonempty path ending in `.csv` or `null`. Default `null`. Selects external rows to match the Kaggle row and tie counts in the active training scope. The saved Parquet must include `source`. See [ranked external selection](data-preparation.md#ranked-external-training-selection) |
+| `data.external_rank_path` | Nonempty path ending in `.csv` or `null`. Default `null`. Selects ranked external rows to approximate the Kaggle token volume and match the tie share by row count in the active training scope. The saved Parquet must include `source`. See [ranked external selection](data-preparation.md#ranked-external-training-selection) |
 | `data.train_supplement_path` | Separate `.parquet` path or `null`; default `null`. Appended to training during validation and standalone warmup; frozen validation is unchanged |
 | `data.build_supplement_path` | Separate `.parquet` path or `null`; default `null`. Full-data builds append this artifact instead of the train supplement. Both supplement paths must differ from the real table and use separate, non-nested directories |
 | `validation.random_state` | Integer |
