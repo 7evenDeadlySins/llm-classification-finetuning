@@ -125,7 +125,7 @@ The remaining model fields belong in the sections shown below.
 | `label_smoothing` | All model sections and `warmup` | Number in `[0, 1]`; default `0.0` |
 | `training_batch_size` | Frozen SR2, LoRA, and `warmup` | Positive integer |
 | `learning_rate` | Frozen SR2, LoRA, and `warmup` | Positive finite number or a string power expression resolving to one; see below |
-| `t` | Top-level YAML, shared by frozen SR2, LoRA, and `warmup` | Fixed tie absolute-difference coefficient. Accepts a finite number in FP32 range and defaults to `2 + √5` (`2φ + 1`, where `φ` is the golden ratio) |
+| `t` | Top-level YAML, shared by frozen SR2, LoRA, and `warmup` | Fixed tie absolute-difference coefficient. Accepts a finite number in FP32 range and defaults to `√5` |
 | `epochs` | LoRA joint training | Required positive integer |
 | `build_epochs` | Frozen SR2 and `warmup` | Positive integer for frozen SR2 builds; optional or `null` for frozen SR2 validation; required non-negative integer for warmup, where `0` disables the inline stage |
 | `early_stopping` | Frozen SR2 validation | Positive integer; default `7`; non-improving epoch window per `patience` stage before stepping `patience` down by `1` or stopping when `patience = 0` |

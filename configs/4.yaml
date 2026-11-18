@@ -23,8 +23,6 @@ gpu:
   attention_implementation: sdpa
   allow_tf32: false
 
-t: 4
-
 SR2_Qwen3_4B:
   factor: 0.95
   patience: 2

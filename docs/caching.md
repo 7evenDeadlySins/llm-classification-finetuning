@@ -307,7 +307,7 @@ compatibility, or other heads' cache identities. V10 uses scaled uniform weights
 for L/M and the win readout and initializes the win projection bias to zero.
 The initial effective tie weights are sampled from
 `U(0.5 * mean, 1.5 * mean)`, with `mean = 0.2 / (3h)`, and encoded in `u`
-using `0.01 * invsoftplus(U_0 / 0.01)`. The fixed `t` defaults to `2 + √5`,
+using `0.01 * invsoftplus(U_0 / 0.01)`. The fixed `t` defaults to `√5`,
 and the unconstrained `tie_bias` starts at zero.
 See the [head definition](lora.md#swap-equivariant-head) for the stable inverse.
 Together, the v10 architecture and its initialization version isolate v9 and

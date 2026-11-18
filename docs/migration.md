@@ -308,7 +308,7 @@ under their existing artifact paths.
 ### SR2 v10 fixed tie coefficient
 
 Remove `t_lr_multiplier` from custom frozen SR2, LoRA, and warmup sections.
-Omit `t` to use `2 + √5`, or set one top-level numeric `t` for the entire
+Omit `t` to use `√5`, or set one top-level numeric `t` for the entire
 configuration. The v10 head stores that value as an FP32 buffer and trains the
 remaining head parameters together.
 

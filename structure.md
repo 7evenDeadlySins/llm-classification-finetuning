@@ -282,7 +282,7 @@ present in a fresh checkout.
    `C_A` and `C_B`, and compute
    `z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff` entirely in
    FP32 with autocast disabled. Here `u_eff = 0.01 * softplus(u / 0.01)` and
-   the fixed coefficient `t` defaults to `2 + √5`. Save raw `u` (`[1, h]`),
+   the fixed coefficient `t` defaults to `√5`. Save raw `u` (`[1, h]`),
    unconstrained scalar `tie_bias`, and the FP32 `t` buffer.
    Both wins share one dropout mask, inherited by the tie features without a
    separate projection or mask. Architecture

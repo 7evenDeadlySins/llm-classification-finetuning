@@ -19,7 +19,7 @@ MAX_VALIDATION_ROW_DEVIATION = 0.005
 
 MAX_VALIDATION_ROW_DEVIATION = 0.005
 
-DEFAULT_T = 2.0 + math.sqrt(5.0)  # 2 * phi + 1
+DEFAULT_T = 5**0.5
 
 LORA_WARMUP_FIELDS = (
 	"warmup_build_epochs",
