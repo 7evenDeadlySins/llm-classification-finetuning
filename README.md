@@ -29,7 +29,7 @@ audit instructions are in [data preparation](docs/data-preparation.md#merged-ext
 Data preparation tools live in [data/](data/), including
 [the external-data merger](data/merge_external_data.py),
 [the synthetic tie generator](data/generate_synthetic_tie.py), and
-[the Kaggle tie duplicate generator](data/generate_kaggle_tie_duplicate.py).
+[the tie duplicate generator](data/generate_tie_duplicate.py).
 
 ## Model profiles
 
@@ -45,13 +45,14 @@ original A/B orientations only. Current presets use the
 [merged real preference dataset](docs/data-preparation.md#merged-external-preferences)
 with hard labels and a frozen Kaggle holdout (**208,997** real training rows;
 **220,492** real build rows). Synthetic self-response tie supplements remain
-excluded, and validation/warmup training currently duplicates **7,343** of the
-**13,997** distinct-response Kaggle training tie rows once via
-`train_supplement_path` (excluding **233** identical-A/B Kaggle training ties
-and randomly removing **6,654** duplicate rows; **216,340** effective training
-rows), while `build_supplement_path` remains `null` and the 11,495 real
-validation rows remain unchanged.
-See [Kaggle tie duplicates](docs/data-preparation.md#kaggle-tie-duplication) and
+excluded, and validation/warmup training currently duplicates **7,343** distinct-response
+real training tie rows once via `train_supplement_path` (from **59,188** eligible
+rows across **55,786** unique prompts after excluding **422** identical-A/B ties,
+capped at one row per prompt and prioritized by lowest training prompt count,
+multi-turn conversation, and fewest A+B tokens; **216,340** effective training
+rows, **30.95%** ties), while `build_supplement_path` remains `null` and the
+11,495 real validation rows remain unchanged.
+See [tie duplicates](docs/data-preparation.md#tie-duplication) and
 [synthetic ties](docs/data-preparation.md#scope-specific-synthetic-ties). `ALL`
 runs configured frozen SR2 before LoRA.
 Both profiles pool the last real token of each branch before the comparison

@@ -10,9 +10,9 @@ from .external import (
 	ConversationExclusion,
 	ExternalConversationConverter,
 )
-from .kaggle_tie_duplicate import KaggleTieDuplicateGenerator
 from .splits import SplitPreparationResult, SplitPreprocessor, SplitSummary
 from .synthetic_tie import SyntheticTieGenerator
+from .tie_duplicate import TieDuplicateGenerator
 
 __all__ = (
 	"TARGET_COLUMNS",
@@ -21,9 +21,9 @@ __all__ = (
 	"ExternalConversationConverter",
 	"ExternalDeduplicationResult",
 	"ExternalVoteConflictError",
-	"KaggleTieDuplicateGenerator",
 	"SplitPreparationResult",
 	"SplitPreprocessor",
 	"SplitSummary",
 	"SyntheticTieGenerator",
+	"TieDuplicateGenerator",
 )

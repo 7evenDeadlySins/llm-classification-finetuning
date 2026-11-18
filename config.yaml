@@ -1,4 +1,4 @@
-# Consume merged real preferences with the frozen Kaggle holdout and duplicated Kaggle train ties.
+# Consume merged real preferences with the frozen Kaggle holdout and prioritized train tie duplicates.
 # HelpSteer3 preference and synthetic ties are temporarily excluded; build_supplement_path remains null.
 # Counts, source revisions and checksums: data/processed/external_merged/summary.json
 
@@ -6,7 +6,7 @@ data:
   competition: llm-classification-finetuning
   raw_dir: data/raw
   processed_path: data/processed/external_merged/train_validation.parquet
-  train_supplement_path: data/kaggle_tie_duplicate/external_merged/train/kaggle_tie_duplicates.parquet
+  train_supplement_path: data/tie_duplicate/external_merged/train/tie_duplicates.parquet
   build_supplement_path: null
 
 validation:

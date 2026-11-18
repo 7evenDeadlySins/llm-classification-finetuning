@@ -76,11 +76,12 @@ Keep YAML pointing to the logical `.parquet`, not the manifest. The saved split
 and selected cache directories use regular Git storage; `.gitattributes`
 preserves binary volume bytes.
 
-Reads reconstruct/checksum large files on disk under `.cache-work/` beside the
-logical artifact, not as one in-memory byte string. Session subdirectories are
-removed on exit; the ignored working directory and locks can remain. Allow space
-for a reconstructed file plus staged volumes during updates, including on Drive
-when `CACHE_PATH` points there.
+Reads reconstruct/checksum large files on disk in the OS temporary directory
+(`tempfile.gettempdir()`), not as one in-memory byte string and without creating
+`.cache-work/` folders inside data or cache directories. Session subdirectories
+are removed on exit. Allow space for a reconstructed file in temporary storage
+and staged volumes beside the target during updates, including on Drive when
+`CACHE_PATH` points there.
 
 Windows/Linux sessions use a per-artifact process lock with a 30-second timeout.
 Updates work on private copies. Small files publish by atomic replacement;

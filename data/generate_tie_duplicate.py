@@ -1,4 +1,4 @@
-"""Generate audited train-partition or full-data Kaggle tie duplicate supplements."""
+"""Generate audited train-partition or full-data prioritized tie duplicate supplements."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from llm_classification_finetuning.cli_config import add_config_argument
 from llm_classification_finetuning.config import AppConfig
 from llm_classification_finetuning.errors import DataPreparationError
-from llm_classification_finetuning.preprocess import KaggleTieDuplicateGenerator
+from llm_classification_finetuning.preprocess import TieDuplicateGenerator
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
@@ -16,9 +16,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
 	add_config_argument(parser)
 	parser.add_argument("--scope", choices=("train", "build", "all"), default="all")
 	parser.add_argument(
-		"--remove-count",
+		"--target-count",
 		type=int,
-		default=KaggleTieDuplicateGenerator.DEFAULT_REMOVE_COUNT,
+		default=TieDuplicateGenerator.DEFAULT_TARGET_COUNT,
 	)
 	parsed_arguments = parser.parse_args(arguments)
 	try:
@@ -40,15 +40,15 @@ def main(arguments: Sequence[str] | None = None) -> int:
 				"Configure the requested data.train_supplement_path or data.build_supplement_path."
 			)
 		for scope in enabled:
-			output = KaggleTieDuplicateGenerator(
+			output = TieDuplicateGenerator(
 				config,
 				scope=scope,
-				remove_count=parsed_arguments.remove_count,
+				target_count=parsed_arguments.target_count,
 			).run()
 			print(f"Generation summary ({scope}): {output / 'summary.json'}")
 		return 0
 	except (DataPreparationError, OSError) as error:
-		print(f"Kaggle tie duplicate generation failed: {error}")
+		print(f"Tie duplicate generation failed: {error}")
 		return 1
 
 

@@ -9,7 +9,6 @@ import shutil
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -25,6 +24,7 @@ from .models.common import (
 	ConversationSerializer,
 	TokenizationCache,
 	TrainingInputLoader,
+	staged_output_directory,
 )
 from .preprocess import (
 	ConversationExclusion,
@@ -105,13 +105,7 @@ class MergeExternalDataPipeline:
 			return file_sha256(session.path)
 
 	def run(self) -> Path:
-		work = self.output.parent / ".cache-work"
-		work.mkdir(parents=True, exist_ok=True)
-		# Unlike mkdtemp's mode 0o700, inherit the project ACL on Windows.
-		stage = work / f"external-merge-{uuid4().hex}"
-		stage.mkdir()
-		stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-		try:
+		with staged_output_directory(self.output) as stage:
 			manifest = ExternalSourceDownloader(
 				self.config.data.raw_dir
 			).ensure_available()
@@ -232,11 +226,7 @@ class MergeExternalDataPipeline:
 				},
 			)
 			self._write_readme(stage)
-			files = [
-				p
-				for p in sorted(stage.rglob("*"))
-				if p.is_file() and ".cache-work" not in p.relative_to(stage).parts
-			]
+			files = [p for p in sorted(stage.rglob("*")) if p.is_file()]
 			self.report["artifacts"] = {
 				p.relative_to(stage).as_posix(): {
 					"bytes": p.stat().st_size,
@@ -264,24 +254,8 @@ class MergeExternalDataPipeline:
 						file_sha256(p) == expected,
 						f"Artifact checksum changed before publication: {p.name}",
 					)
-			backup = self.output.with_name(f"{self.output.name}.backup-{stamp}")
-			if self.output.exists():
-				self.output.rename(backup)
-			try:
-				stage.rename(self.output)
-			except BaseException:
-				if backup.exists() and not self.output.exists():
-					backup.rename(self.output)
-				raise
-			print(f"Published merged dataset: {self.output}", flush=True)
-			return self.output
-		except BaseException as error:
-			self.report.update(
-				status="failed", error=f"{type(error).__name__}: {error}"
-			)
-			self._json(stage / "summary.json", self.report)
-			print(f"Merge failed; diagnostics remain at {stage}", flush=True)
-			raise
+		print(f"Published merged dataset: {self.output}", flush=True)
+		return self.output
 
 	def _filter_context(
 		self,

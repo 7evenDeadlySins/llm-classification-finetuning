@@ -72,8 +72,9 @@ single file or multipart:
 - At least 100 MiB: `.parquet.manifest.json` plus `.parquet.parts/`, each volume
   at most 99 MiB.
 
-Loaders reconstruct and checksum the artifact automatically in an ignored
-`.cache-work/` directory. The data fingerprint hashes reconstructed Parquet
+Loaders reconstruct and checksum the artifact automatically in the OS temporary
+directory (`tempfile.gettempdir()`), leaving no `.cache-work/` or `.backup-*`
+directories in the dataset folder. The data fingerprint hashes reconstructed Parquet
 bytes, independent of storage layout. Keep the manifest and all referenced
 volumes together. Corrupt multipart data is archived and requires preprocessing
 again. See [shared storage](caching.md#shared-storage-and-multipart-files) for
@@ -104,8 +105,8 @@ with HelpSteer3 preference temporarily excluded on 2026-11-17. Data is construct
 All targets are hard labels with integer one-hot winner fields. Rows have equal
 training weight. The saved real-data table retains its natural class proportions;
 current presets temporarily disable [scope-specific synthetic ties](#scope-specific-synthetic-ties),
-and enable [Kaggle tie duplication](#kaggle-tie-duplication) for validation
-training and standalone warmup (`train_supplement_path: data/kaggle_tie_duplicate/external_merged/train/kaggle_tie_duplicates.parquet`,
+and enable [tie duplication](#tie-duplication) for validation
+training and standalone warmup (`train_supplement_path: data/tie_duplicate/external_merged/train/tie_duplicates.parquet`,
 `build_supplement_path: null`).
 
 The standard merger rebuilds the full pinned source set, including HelpSteer3:
@@ -266,42 +267,50 @@ After any real-data rebuild, update `validation.validation_fraction` in
 both supplements with the command below. Their source fingerprints must match
 the newly published real table.
 
-## Kaggle tie duplication
+## Tie duplication
 
-To reinforce real distinct-response Kaggle tie examples during holdout validation
+To reinforce real distinct-response tie examples during holdout validation
 and standalone warmup without modifying the audited real-data table or touching
-the frozen validation set, `data/generate_kaggle_tie_duplicate.py` generates an
-independent supplement containing one duplicate of each eligible Kaggle tie row
+the frozen validation set, `data/generate_tie_duplicate.py` generates an
+independent supplement containing one duplicate per selected eligible tie row
 (`label=2`, `is_swapped=False`, `response_a != response_b`) with fresh unique
 `id`s starting after the maximum real ID:
 
 ```powershell
-uv run python data/generate_kaggle_tie_duplicate.py --config config.yaml --scope all
+uv run python data/generate_tie_duplicate.py --config config.yaml --scope all
 ```
 
-`--scope train|build|all` defaults to `all`, generating every configured scope.
+`--scope train|build|all` defaults to `all`, generating every configured scope,
+and `--target-count` defaults to `7343`.
 Current presets set `data.train_supplement_path` to
-`data/kaggle_tie_duplicate/external_merged/train/kaggle_tie_duplicates.parquet`
+`data/tie_duplicate/external_merged/train/tie_duplicates.parquet`
 and leave `data.build_supplement_path: null`:
 
-- `train` scope selects from the **13,997** distinct-response Kaggle
-  `split="train"` tie rows (excluding **233** identical-A/B Kaggle training tie
-  rows out of 14,230 total) and deterministically removes **6,654** random
-  duplicate rows (`validation.random_state: 42`), retaining **7,343**
-  duplicated rows and increasing holdout/warmup training rows from **208,997**
-  (59,610 ties, 28.52%) to **216,340** (66,953 ties, 30.95%) while keeping the
-  11,495 validation rows untouched.
+- `train` scope selects from all **59,188** distinct-response `split="train"`
+  tie rows across **55,786** unique prompts (excluding **422** identical-A/B
+  training tie rows out of 59,610 total), keeps at most one row per prompt
+  (`group_id`), and picks the first **7,343** rows ordered by total prompt
+  occurrences in `split="train"` ascending, multi-turn conversations first,
+  complete `tokens_a + tokens_b` ascending (reusing pinned
+  `token_stats.parquet` or `TokenizationCache`), and original `id` ascending.
+- On the current snapshot, all **7,343** selected rows have `prompt_count = 1`
+  and are multi-turn conversations (`tokens_a + tokens_b` from **82** to
+  **3,474**, mean **1,681.85**; `arena_human` **5,008**, `kaggle` **1,517**,
+  `lmsys` **788**, `arena_expert` **30**), increasing holdout/warmup training
+  rows from **208,997** (59,610 ties, 28.52%) to **216,340** (66,953 ties,
+  30.95%) while keeping the 11,495 validation rows untouched.
 - `BuildSupplementLoader` validates schema metadata
-  (`llm_classification_finetuning.row_duplicate`), `source_sha256`,
-  `remove_count`, `source_original_id` subset membership, validation-prompt
-  isolation, and field parity with the real dataset.
+  (`llm_classification_finetuning.row_duplicate`, `schema_version=2`,
+  `kind="tie_duplicate"`), `source_sha256`, `max_per_prompt=1`, `target_count`,
+  unique `group_id` values, `source_original_id` subset membership,
+  validation-prompt isolation, and field parity with the real dataset.
 
 ## Scope-specific synthetic ties
 
 The real-data merger preserves natural labels and counts. Current presets
 temporarily exclude synthetic ties (`data.build_supplement_path: null`;
 `data.train_supplement_path` is currently used for
-[Kaggle tie duplication](#kaggle-tie-duplication) instead), and the local
+[tie duplication](#tie-duplication) instead), and the local
 synthetic-tie files under `data/synthetic_tie/external_merged/context40960/` were
 removed. When enabled,
 training appends independent self-response ties to match the corrected

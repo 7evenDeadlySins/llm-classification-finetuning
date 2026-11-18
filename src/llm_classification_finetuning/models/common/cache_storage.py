@@ -22,6 +22,38 @@ class CacheCorruptionError(OSError):
 	"""A multipart cache cannot be reconstructed and must be rebuilt."""
 
 
+@contextmanager
+def staged_output_directory(target: Path) -> Iterator[Path]:
+	"""Yield an ACL-inheriting sibling staging directory and publish it atomically.
+
+	Any superseded ``target`` directory is removed immediately once replacement
+	succeeds, and temporary staging directories are always cleaned up on exit.
+	"""
+	target.parent.mkdir(parents=True, exist_ok=True)
+	# Inherit the target parent's Windows ACL instead of mkdtemp's private mode.
+	stage = target.with_name(f".{target.name}.staging-{uuid4().hex}")
+	stage.mkdir()
+	published = False
+	try:
+		yield stage
+		backup = target.with_name(f".{target.name}.old-{uuid4().hex}")
+		had_target = target.exists()
+		if had_target:
+			target.rename(backup)
+		try:
+			stage.rename(target)
+		except BaseException:
+			if had_target and backup.exists() and not target.exists():
+				backup.rename(target)
+			raise
+		published = True
+		if had_target and backup.exists():
+			shutil.rmtree(backup)
+	finally:
+		if not published and stage.exists():
+			shutil.rmtree(stage, ignore_errors=True)
+
+
 @dataclass(slots=True)
 class CacheFileSession:
 	"""A private working file, published only after a successful writable session."""
@@ -61,7 +93,9 @@ class CacheStorage:
 		self.path = path.resolve()
 		self.manifest_path = self.path.with_name(f"{self.path.name}.manifest.json")
 		self.parts_path = self.path.with_name(f"{self.path.name}.parts")
-		self._work_root = self.path.parent / ".cache-work"
+		self._work_root = (
+			Path(tempfile.gettempdir()) / "llm-classification-finetuning-cache-work"
+		)
 		self._lock_key = hashlib.sha256(
 			os.fsencode(os.path.normcase(self.path))
 		).hexdigest()
@@ -326,10 +360,14 @@ class CacheStorage:
 	def _replace_file(source: Path, destination: Path) -> None:
 		"""Publish atomically with destination-directory permissions on Windows."""
 		if os.name != "nt":
-			os.replace(source, destination)
-			return
-		# Windows moves retain the private TemporaryDirectory's restrictive ACL.
-		# Create the published file beside its destination so it inherits that ACL.
+			try:
+				os.replace(source, destination)
+				return
+			except OSError as error:
+				if error.errno != errno.EXDEV:
+					raise
+		# Windows moves retain a private TemporaryDirectory's restrictive ACL, and
+		# POSIX cross-filesystem moves fail with EXDEV; stage beside destination.
 		descriptor, name = tempfile.mkstemp(
 			prefix=".cache-publish-", suffix=".tmp", dir=destination.parent
 		)

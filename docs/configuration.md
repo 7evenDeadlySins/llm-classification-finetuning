@@ -27,7 +27,7 @@ This process-wide allocator setting requires a fresh process to take effect.
 | `--config PATH` | `./config.yaml` | Selected complete YAML file |
 | `data.raw_dir` | Required YAML path; root preset `data/raw` | Raw competition CSVs |
 | `data.processed_path` | Required YAML `.parquet` path; root preset `data/processed/external_merged/train_validation.parquet` | Saved train/validation data, including multipart layout |
-| `data.train_supplement_path` | Optional YAML path | Independent supplement (synthetic ties or Kaggle tie duplicates) for validation training and standalone warmup |
+| `data.train_supplement_path` | Optional YAML path | Independent supplement (synthetic ties or tie duplicates) for validation training and standalone warmup |
 | `data.build_supplement_path` | Optional YAML path | Independent supplement for full-data model builds |
 | `MODEL_PATH` | Optional environment or `.env`; missing/blank uses native HF settings | Downloaded model/config/tokenizer cache |
 | `HF_HUB_OFFLINE` | Environment or `.env`; runtime template and Colab validation/build use `1` | Load required HF files locally without Hub requests; use `0` in a separate download process to fill missing files |

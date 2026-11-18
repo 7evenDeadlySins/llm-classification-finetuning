@@ -23,8 +23,8 @@ class BuildSupplementLoader:
 	TARGET_TIE_SHARE = Fraction(17788, 57477)
 	METADATA_KEY = b"llm_classification_finetuning.synthetic_tie"
 	DUPLICATE_METADATA_KEY = b"llm_classification_finetuning.row_duplicate"
-	DUPLICATE_SCHEMA_VERSION = 1
-	KAGGLE_TIE_DUPLICATE_KIND = "kaggle_tie_duplicate"
+	DUPLICATE_SCHEMA_VERSION = 2
+	TIE_DUPLICATE_KIND = "tie_duplicate"
 	PROVENANCE_COLUMNS = (
 		"source_original_id",
 		"source_side",
@@ -153,10 +153,10 @@ class BuildSupplementLoader:
 		identity: dict,
 		original: TrainingInputs,
 	) -> None:
-		"""Validate metadata and contents for a real-row duplication supplement."""
+		"""Validate metadata and contents for a real-row tie duplication supplement."""
 		if identity.get("schema_version") != self.DUPLICATE_SCHEMA_VERSION:
 			raise ValueError("unsupported duplicate supplement schema")
-		if identity.get("kind") != self.KAGGLE_TIE_DUPLICATE_KIND:
+		if identity.get("kind") != self.TIE_DUPLICATE_KIND:
 			raise ValueError("unsupported duplicate supplement kind")
 		if identity.get("scope") != self.scope:
 			raise ValueError(
@@ -167,35 +167,31 @@ class BuildSupplementLoader:
 				"supplement source SHA-256 does not match the processed dataset"
 			)
 		if (
-			identity.get("source_dataset") != "kaggle"
-			or identity.get("source_label") != 2
+			identity.get("source_label") != 2
 			or identity.get("repeat") != 1
 			or identity.get("exclude_identical_ab") is not True
+			or identity.get("max_per_prompt") != 1
 		):
 			raise ValueError("duplicate supplement provenance metadata is inconsistent")
 		expected = self._duplicate_sources(original.data, self.scope)
-		remove_count = identity.get("remove_count", 0)
+		max_unique_prompts = int(expected["group_id"].nunique())
+		target_count = identity.get("target_count")
 		if (
-			isinstance(remove_count, bool)
-			or not isinstance(remove_count, int)
-			or not 0 <= remove_count < len(expected)
+			isinstance(target_count, bool)
+			or not isinstance(target_count, int)
+			or not 0 < target_count <= max_unique_prompts
 		):
-			raise ValueError("duplicate supplement remove_count is invalid")
-		if "eligible_count" in identity and identity["eligible_count"] != len(expected):
-			raise ValueError(f"supplement eligible count must be {len(expected):,}")
-		expected_count = len(expected) - remove_count
-		if identity.get("target_count") != expected_count:
-			raise ValueError(f"supplement target count must be {expected_count:,}")
+			raise ValueError("duplicate supplement target_count is invalid")
 		self.validate_duplicate(
 			data,
 			original.data,
 			scope=self.scope,
-			expected_count=expected_count,
+			expected_count=target_count,
 		)
 
 	@staticmethod
 	def _duplicate_sources(original: pd.DataFrame, scope: str) -> pd.DataFrame:
-		"""Select eligible non-identical-A/B Kaggle tie rows from the target scope."""
+		"""Select eligible non-identical-A/B real tie rows from the target scope."""
 		if scope not in {"train", "build"}:
 			raise ValueError("Supplement scope must be 'train' or 'build'.")
 		base = (
@@ -203,16 +199,11 @@ class BuildSupplementLoader:
 		)
 		if base.empty:
 			raise ValueError("Supplement scope has no original rows.")
-		kaggle = (
-			base["source"].eq("kaggle")
-			if "source" in base.columns
-			else base["id"].lt(1 << 32)
-		)
 		sources = base.loc[
-			kaggle & base["label"].eq(2) & base["response_a"].ne(base["response_b"])
+			base["label"].eq(2) & base["response_a"].ne(base["response_b"])
 		]
 		if sources.empty:
-			raise ValueError("Supplement scope has no eligible Kaggle tie rows.")
+			raise ValueError("Supplement scope has no eligible tie rows.")
 		return sources
 
 	@classmethod
@@ -224,7 +215,7 @@ class BuildSupplementLoader:
 		scope: str = "build",
 		expected_count: int | None = None,
 	) -> None:
-		"""Check exact Kaggle tie duplicate count, IDs, labels, and source rows."""
+		"""Check exact tie duplicate count, IDs, unique prompts, labels, and source rows."""
 		required = [
 			*TrainingInputLoader.REQUIRED_COLUMNS,
 			*cls.DUPLICATE_PROVENANCE_COLUMNS,
@@ -235,11 +226,12 @@ class BuildSupplementLoader:
 			"winner_tie",
 		]
 		expected = cls._duplicate_sources(original, scope)
-		target_count = len(expected) if expected_count is None else expected_count
+		max_unique_prompts = int(expected["group_id"].nunique())
+		target_count = max_unique_prompts if expected_count is None else expected_count
 		if (
 			isinstance(target_count, bool)
 			or not isinstance(target_count, int)
-			or not 0 < target_count <= len(expected)
+			or not 0 < target_count <= max_unique_prompts
 		):
 			raise ValueError("duplicate supplement expected_count is invalid")
 		if len(data) != target_count or data.loc[:, required].isna().any().any():
@@ -266,22 +258,21 @@ class BuildSupplementLoader:
 			and data.winner_model_a.eq(0).all()
 			and data.winner_model_b.eq(0).all()
 			and data.winner_tie.eq(1).all()
-			and data.source_dataset.eq("kaggle").all()
+			and data.source_dataset.astype(str).str.len().gt(0).all()
 			and data.response_a.ne(data.response_b).all()
 		):
 			raise ValueError(
-				f"supplement must contain {scope} non-identical-A/B Kaggle tie duplicates"
+				f"supplement must contain {scope} non-identical-A/B tie duplicates"
 			)
+		if data.group_id.duplicated().any():
+			raise ValueError("supplement must contain at most one row per prompt")
 		source_ids = set(data.source_original_id.astype("int64"))
 		expected_ids = set(expected.id.astype("int64"))
-		valid_source_ids = (
-			source_ids == expected_ids
-			if target_count == len(expected)
-			else source_ids.issubset(expected_ids)
-		)
-		if data.source_original_id.duplicated().any() or not valid_source_ids:
+		if data.source_original_id.duplicated().any() or not source_ids.issubset(
+			expected_ids
+		):
 			raise ValueError(
-				"supplement source_original_id values must come from unique eligible Kaggle ties"
+				"supplement source_original_id values must come from unique eligible ties"
 			)
 		if scope == "train":
 			validation = original.loc[original.split.eq("validation")]

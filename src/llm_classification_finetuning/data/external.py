@@ -136,28 +136,17 @@ class ExternalSourceDownloader:
 			or destination.stat().st_size != size
 			or file_sha256(destination) != checksum
 		):
-			legacy = (
-				Path.cwd()
-				/ ".cache-work/lmsys33k-build/hf-cache"
-				/ f"datasets--{source.repository.replace('/', '--')}"
-				/ "snapshots"
-				/ source.revision
-				/ filename
-			)
-			if legacy.is_file() and file_sha256(legacy) == checksum:
-				path = legacy
-			else:
-				print(f"Downloading {source.name}: {filename}", flush=True)
-				path = Path(
-					hf_hub_download(
-						source.repository,
-						filename,
-						repo_type="dataset",
-						revision=source.revision,
-						cache_dir=self.root / "hub",
-						endpoint="https://huggingface.co",
-					)
+			print(f"Downloading {source.name}: {filename}", flush=True)
+			path = Path(
+				hf_hub_download(
+					source.repository,
+					filename,
+					repo_type="dataset",
+					revision=source.revision,
+					cache_dir=self.root / "hub",
+					endpoint="https://huggingface.co",
 				)
+			)
 			if path.stat().st_size != size or file_sha256(path) != checksum:
 				raise DataPreparationError(
 					f"Official checksum mismatch: {source.name}/{filename}"

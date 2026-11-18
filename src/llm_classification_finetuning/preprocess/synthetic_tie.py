@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -31,6 +30,7 @@ from ..models.common import (
 	TrainingInputLoader,
 	TrainingInputs,
 	TokenizationCache,
+	staged_output_directory,
 )
 
 
@@ -227,13 +227,7 @@ class SyntheticTieGenerator:
 
 	def run(self) -> Path:
 		"""Stage all files, validate readback, and promote only a complete run."""
-		work_root = self.output.parent / ".cache-work"
-		work_root.mkdir(parents=True, exist_ok=True)
-		# Inherit the project ACL; mkdtemp's private Windows ACL survives renames.
-		stage = work_root / f"synthetic-tie-{uuid4().hex}"
-		stage.mkdir()
-		stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-		try:
+		with staged_output_directory(self.output) as stage:
 			self._load()
 			self._collect()
 			self._count_tokens()
@@ -259,14 +253,10 @@ class SyntheticTieGenerator:
 					"sha256": self._digest(path),
 				}
 				for path in sorted(stage.rglob("*"))
-				if path.is_file() and ".cache-work" not in path.relative_to(stage).parts
+				if path.is_file()
 			}
 			self._json(stage / "summary.json", self.report)
-			files = [
-				path
-				for path in sorted(stage.rglob("*"))
-				if path.is_file() and ".cache-work" not in path.relative_to(stage).parts
-			]
+			files = [path for path in sorted(stage.rglob("*")) if path.is_file()]
 			(stage / "checksums.sha256").write_text(
 				"".join(
 					f"{self._digest(path)}  {path.relative_to(stage).as_posix()}\n"
@@ -274,30 +264,8 @@ class SyntheticTieGenerator:
 				),
 				encoding="utf-8",
 			)
-			# Keep the previous successful run recoverable if replacement is requested.
-			backup = self.output.with_name(f"{self.output.name}.backup-{stamp}")
-			if self.output.exists():
-				self.output.rename(backup)
-			try:
-				stage.rename(self.output)
-			except BaseException:
-				if backup.exists() and not self.output.exists():
-					backup.rename(self.output)
-				raise
-			print(f"Published synthetic ties: {self.output}", flush=True)
-			return self.output
-		except BaseException as error:
-			self.report.update(
-				status="failed", error=f"{type(error).__name__}: {error}"
-			)
-			if stage.exists():
-				self._json(stage / "summary.json", self.report)
-				self._jsonl(stage / "selection.jsonl", self.selections)
-				self._jsonl(stage / "replacements.jsonl", self.replacements)
-				failure = self.output.with_name(f"{self.output.name}.failed-{stamp}")
-				stage.rename(failure)
-				print(f"Generation failed; diagnostic audit: {failure}", flush=True)
-			raise
+		print(f"Published synthetic ties: {self.output}", flush=True)
+		return self.output
 
 	def _load(self) -> None:
 		with CacheStorage(self.config.data.processed_path).open("r") as session:

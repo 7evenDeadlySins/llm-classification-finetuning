@@ -2,7 +2,12 @@
 
 from .backbone import LocalBackboneFingerprint
 from .cache import EmbeddingCache, EmbeddingCacheKey, EmbeddingCacheRows
-from .cache_storage import CacheCorruptionError, CacheFileSession, CacheStorage
+from .cache_storage import (
+	CacheCorruptionError,
+	CacheFileSession,
+	CacheStorage,
+	staged_output_directory,
+)
 from .contracts import (
 	ModelBuildResult,
 	ModelExecutionResult,
@@ -66,4 +71,5 @@ __all__ = (
 	"TrainingProgress",
 	"ValidationTrainingResult",
 	"WarmupBuildResult",
+	"staged_output_directory",
 )

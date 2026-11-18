@@ -122,11 +122,12 @@ and use the 220,492-row context-filtered merged real preference dataset with
 HelpSteer3 temporarily excluded (208,997 real training rows; 11,495 frozen
 validation rows). For holdout validation and standalone warmup, current presets
 set `data.train_supplement_path` to the
-[Kaggle tie duplicate supplement](data-preparation.md#kaggle-tie-duplication),
-appending 7,343 duplicated distinct-response Kaggle training tie rows
-(excluding 233 identical-A/B Kaggle training ties and randomly removing 6,654
-of the 13,997 duplicates; 216,340 effective training rows) while holdout
-evaluation retains only its 11,495 real rows.
+[tie duplicate supplement](data-preparation.md#tie-duplication),
+appending 7,343 duplicated distinct-response real training tie rows
+(excluding 422 identical-A/B training ties, capped at one row per prompt, and
+prioritized by lowest training prompt count, multi-turn conversation, and fewest
+A+B tokens; 216,340 effective training rows) while holdout evaluation retains
+only its 11,495 real rows.
 Build directly from the prepared dataset:
 
 ```shell
