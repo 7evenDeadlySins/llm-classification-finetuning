@@ -131,6 +131,7 @@ class LoRAQwenClassifier(nn.Module):
 			config.dropout,
 			compute_dtype=self.feature_dtype,
 			head_architecture=self.head_architecture,
+			t=config.t,
 		).to(device=self.device, dtype=torch.float32)
 
 	@property
@@ -138,7 +139,7 @@ class LoRAQwenClassifier(nn.Module):
 		"""Return the effective absolute-difference coefficient for the SR2 head."""
 		if self.head_architecture != SR2:
 			return None
-		return (1.0 + F.softplus(self.classifier.raw_t.detach())).item()
+		return self.classifier.t.item()
 
 	def load_frozen_backbone(self) -> None:
 		"""Load weights only for missing features without advancing the head's RNG."""

@@ -268,7 +268,7 @@ existing namespace. Storage schemas, artifact paths, and old files were unchange
 Token, adapter-free frozen-feature, and batch-plan caches retained their existing
 identities and reuse rules. Reports from this version retain their v8 markers.
 
-### Current SR2 v9 head (2026-11-15)
+### SR2 v9 head (2026-11-15)
 
 `swap_equivariant_abs_diff_v9` retains the cross-projected win branches, shared
 dropout, L/M/R initialization, and zero win projection bias. It removes the
@@ -300,15 +300,23 @@ encoding of positive effective weights. With `s = 0.01` and
 `raw_b_tie` and starts at zero. The parameter count becomes `2Dh + 3h + 2`;
 the FP32 output order remains `[A-win, B-win, tie]`.
 
-Frozen SR2, LoRA SR2, standalone/inline warmup, and `submit.ipynb` use v9.
-Rebuild v8 and earlier checkpoints; their weights are not converted. Architecture
-and exact tensor-name/shape checks reject the older layouts, including
-`raw_b_tie`. The architecture and initialization version select fresh warmup
-keys within the same namespace. Adapter/head schema v2, frozen-head schema v1,
-warmup schema v5, artifact paths, and historical files remain unchanged. Token,
-adapter-free frozen-feature, and batch-plan caches retain their reuse rules.
-The publisher retains the historical v8 embedding mapping; new reports use v9
-markers. See the [current head definition](lora.md#swap-equivariant-head).
+Frozen SR2, LoRA SR2, standalone and inline warmup, and `submit.ipynb` moved
+to v9. The architecture and initialization version selected new warmup keys
+under schema v5. Adapter/head schema v2 and frozen-head schema v1 continued
+under their existing artifact paths.
+
+### SR2 v10 fixed tie coefficient
+
+Remove `t_lr_multiplier` from custom frozen SR2, LoRA, and warmup sections.
+Omit `t` to use `2 + √5`, or set one top-level numeric `t` for the entire
+configuration. The v10 head stores that value as an FP32 buffer and trains the
+remaining head parameters together.
+
+V10 uses new completed head-state cache keys for each `t`. Token, frozen
+feature, and LoRA batch-plan caches follow their existing reuse rules. Build
+again to produce a v10 checkpoint. The submission notebook also reads existing
+v9 LoRA builds using their learned coefficient for inference. See the
+[head definition](lora.md#swap-equivariant-head).
 
 ### Standalone SR2 warmup profile
 

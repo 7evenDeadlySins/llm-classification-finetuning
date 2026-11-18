@@ -58,9 +58,10 @@ runs configured frozen SR2 before LoRA.
 Both profiles pool the last real token of each branch before the comparison
 head. LoRA joint training and validation use the same pooling as frozen SR2
 and head warmup.
-Validation summaries print `t` from the epoch with the lowest validation loss;
-full-data build summaries print the final `t`. This is the absolute-difference
-coefficient `t = 1 + softplus(raw_t)` in the tie formula.
+The tie formula uses a fixed absolute-difference coefficient `t`. The top-level
+YAML field `t` applies to both profiles and warmup and defaults to
+`2φ + 1 = 2 + √5 ≈ 4.236068`, where `φ` is the golden ratio. Validation and build
+summaries print the effective value.
 The frozen model has independent training settings and shares
 compatible head/feature caches with LoRA warmup and the separate `warmup --build`
 selector. Retired Qwen profiles and

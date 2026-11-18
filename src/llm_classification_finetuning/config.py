@@ -19,6 +19,8 @@ MAX_VALIDATION_ROW_DEVIATION = 0.005
 
 MAX_VALIDATION_ROW_DEVIATION = 0.005
 
+DEFAULT_T = 2.0 + math.sqrt(5.0)  # 2 * phi + 1
+
 LORA_WARMUP_FIELDS = (
 	"warmup_build_epochs",
 	"warmup_training_batch_size",
@@ -96,7 +98,7 @@ class WarmupModelConfig:
 	dataloader_workers: int
 	ab_swap: str
 	label_smoothing: float = field(default=0.0, kw_only=True)
-	t_lr_multiplier: float = field(default=1.0, kw_only=True)
+	t: float = field(default=DEFAULT_T, kw_only=True)
 	warmup_build_min_lr: float = field(kw_only=True)
 
 
@@ -116,7 +118,7 @@ class SR2ModelConfig:
 	dataloader_workers: int
 	ab_swap: str
 	label_smoothing: float = 0.0
-	t_lr_multiplier: float = field(default=1.0, kw_only=True)
+	t: float = field(default=DEFAULT_T, kw_only=True)
 	build_epochs: int | None = field(default=None, kw_only=True)
 	max_grad_norm: float = field(kw_only=True)
 	build_min_lr: float = field(kw_only=True)
@@ -153,7 +155,6 @@ class LoRAModelConfig(WarmupModelConfig):
 	min_lr_ratio: float = field(default=0.125, kw_only=True)
 	lr_decay_delay_epochs: int = field(default=0, kw_only=True)
 	warmup_label_smoothing: float = field(default=0.0, kw_only=True)
-	warmup_t_lr_multiplier: float = field(default=1.0, kw_only=True)
 	gradient_checkpointing_threshold: int = 0
 	gradient_checkpointing_budget: int = 0
 
@@ -208,6 +209,7 @@ class AppConfig:
 				"data",
 				"validation",
 				"gpu",
+				"t",
 				"SR2_Qwen3_4B_lora",
 				"SR2_Qwen3_4B",
 				"warmup",
@@ -250,10 +252,15 @@ class AppConfig:
 			},
 			"gpu",
 		)
-		warmup = _load_warmup_model_config(root) if "warmup" in root else None
-		SR2_Qwen3_4B = _load_sr2_model_config(root) if "SR2_Qwen3_4B" in root else None
+		t = _require_float(root.get("t", DEFAULT_T), "t")
+		if abs(t) > float.fromhex("0x1.fffffep127"):
+			raise ConfigurationError("t must be within the finite FP32 range.")
+		warmup = _load_warmup_model_config(root, t=t) if "warmup" in root else None
+		SR2_Qwen3_4B = (
+			_load_sr2_model_config(root, t=t) if "SR2_Qwen3_4B" in root else None
+		)
 		SR2_Qwen3_4B_lora = (
-			_load_lora_model_config(root, warmup, "SR2_Qwen3_4B_lora")
+			_load_lora_model_config(root, warmup)
 			if "SR2_Qwen3_4B_lora" in root
 			else None
 		)
@@ -407,7 +414,7 @@ def resolve_result_dir(base_dir: Path) -> Path:
 	)
 
 
-def _load_sr2_model_config(root: Mapping[str, Any]) -> SR2ModelConfig:
+def _load_sr2_model_config(root: Mapping[str, Any], *, t: float) -> SR2ModelConfig:
 	section_name = "SR2_Qwen3_4B"
 	section = dict(_require_mapping(root.get(section_name), section_name))
 	early_stopping = _require_positive_integer(
@@ -420,7 +427,7 @@ def _load_sr2_model_config(root: Mapping[str, Any]) -> SR2ModelConfig:
 	if patience < 0:
 		raise ConfigurationError(f"{section_name}.patience cannot be negative.")
 	shared = _load_warmup_model_config(
-		{section_name: section}, section_name, allow_unbounded_epochs=True
+		{section_name: section}, section_name, t=t, allow_unbounded_epochs=True
 	)
 	aliases = {name: name.removeprefix("warmup_") for name in LORA_WARMUP_FIELDS}
 	if shared.warmup_build_epochs is not None and shared.warmup_build_epochs <= 0:
@@ -437,6 +444,7 @@ def _load_warmup_model_config(
 	root: Mapping[str, Any],
 	section_name: str = "warmup",
 	*,
+	t: float,
 	allow_unbounded_epochs: bool = False,
 ) -> WarmupModelConfig:
 	"""Map public head-training fields to the shared internal warmup settings."""
@@ -444,7 +452,7 @@ def _load_warmup_model_config(
 	aliases = {name: name.removeprefix("warmup_") for name in LORA_WARMUP_FIELDS}
 	keys = {
 		aliases.get(name, name) for name in WarmupModelConfig.__dataclass_fields__
-	} - {"ab_swap"}
+	} - {"ab_swap", "t"}
 	_reject_unknown_keys(section, keys, section_name)
 	values = dict(section)
 	for internal, public in aliases.items():
@@ -453,6 +461,7 @@ def _load_warmup_model_config(
 	return _load_warmup_fields(
 		values,
 		section_name,
+		t=t,
 		field_aliases=aliases,
 		allow_unbounded_epochs=allow_unbounded_epochs,
 	)
@@ -462,6 +471,7 @@ def _load_warmup_fields(
 	section: Mapping[str, Any],
 	section_name: str,
 	*,
+	t: float,
 	field_aliases: Mapping[str, str] | None = None,
 	allow_unbounded_epochs: bool = False,
 ) -> WarmupModelConfig:
@@ -520,9 +530,7 @@ def _load_warmup_fields(
 		warmup_training_batch_size=positive_integer("warmup_training_batch_size"),
 		warmup_learning_rate=warmup_learning_rate,
 		warmup_build_min_lr=warmup_build_min_lr,
-		t_lr_multiplier=_require_t_lr_multiplier(
-			section.get("t_lr_multiplier", 1.0), field("t_lr_multiplier")
-		),
+		t=t,
 		max_grad_norm=positive_float("max_grad_norm"),
 		random_state=_require_integer(
 			section.get("random_state"), field("random_state")
@@ -541,9 +549,9 @@ def _load_lora_model_config(
 	section = _require_mapping(root.get(section_name), section_name)
 	keys = set(LoRAModelConfig.__dataclass_fields__) - {
 		"ab_swap",
+		"t",
 		"warmup_extraction_budget",
 		"warmup_label_smoothing",
-		"warmup_t_lr_multiplier",
 		*LORA_WARMUP_FIELDS,
 	}
 	_reject_unknown_keys(section, keys, section_name)
@@ -569,6 +577,7 @@ def _load_lora_model_config(
 	shared = _load_warmup_fields(
 		{**section, **{name: getattr(warmup, name) for name in LORA_WARMUP_FIELDS}},
 		section_name,
+		t=warmup.t,
 	)
 	min_lr_ratio = _require_float(
 		section.get("min_lr_ratio", 0.125), field("min_lr_ratio")
@@ -616,7 +625,6 @@ def _load_lora_model_config(
 		**asdict(shared),
 		warmup_extraction_budget=warmup.extraction_budget,
 		warmup_label_smoothing=warmup.label_smoothing,
-		warmup_t_lr_multiplier=warmup.t_lr_multiplier,
 		training_batch_size=positive_integer("training_batch_size"),
 		head_inference_batch_size=positive_integer("head_inference_batch_size"),
 		gradient_accumulation_steps=positive_integer("gradient_accumulation_steps"),
@@ -753,14 +761,6 @@ def _require_float(value: Any, field_name: str) -> float:
 	if not math.isfinite(number):
 		raise ConfigurationError(f"{field_name} must be finite.")
 	return number
-
-
-def _require_t_lr_multiplier(value: Any, field_name: str) -> float:
-	"""Allow a zero rate for raw_t or a finite multiplier of at least one."""
-	multiplier = _require_float(value, field_name)
-	if multiplier != 0.0 and multiplier < 1.0:
-		raise ConfigurationError(f"{field_name} must be 0 or at least 1.")
-	return multiplier
 
 
 def _require_learning_rate(value: Any, field_name: str) -> float:

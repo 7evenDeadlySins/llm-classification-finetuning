@@ -9,14 +9,15 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+from ...config import DEFAULT_T
 from ..common.model import PairwiseClassificationHead
 
 PAIRWISE_MLP = "pairwise_mlp"
 EXPT = "swap_equivariant_reparam_v2"
 EXPT2 = "swap_equivariant_tie_from_wins_v2"
-SR2 = "swap_equivariant_abs_diff_v9"
+SR2 = "swap_equivariant_abs_diff_v10"
 # Bump this version whenever the SR2 initialization policy changes.
-SR2_INITIALIZATION_VERSION = "scaled_uniform_clamped_gelu_tie_v5"
+SR2_INITIALIZATION_VERSION = "scaled_uniform_clamped_gelu_tie_v6"
 
 
 class _LoRAClassificationHead(PairwiseClassificationHead):
@@ -175,6 +176,7 @@ class SwapEquivariantAbsoluteDifferenceClassificationHead(nn.Module):
 		dropout: float,
 		*,
 		compute_dtype: torch.dtype,
+		t: float = DEFAULT_T,
 	) -> None:
 		super().__init__()
 		self._compute_dtype = compute_dtype
@@ -188,7 +190,7 @@ class SwapEquivariantAbsoluteDifferenceClassificationHead(nn.Module):
 		self.win_readout = nn.Linear(hidden_size, 1, bias=False)
 		# Scaled softplus keeps the effective tie weights positive.
 		self.u = nn.Parameter(torch.empty((1, hidden_size), dtype=torch.float32))
-		self.raw_t = nn.Parameter(torch.empty((), dtype=torch.float32))
+		self.register_buffer("t", torch.tensor(t, dtype=torch.float32))
 		self.tie_bias = nn.Parameter(torch.zeros((), dtype=torch.float32))
 		self.activation = nn.GELU()
 		self.dropout = nn.Dropout(dropout)
@@ -208,8 +210,6 @@ class SwapEquivariantAbsoluteDifferenceClassificationHead(nn.Module):
 			initial_u = self.u / 0.01
 			# Stable inverse softplus: x + log(-expm1(-x)).
 			self.u.copy_(0.01 * (initial_u + torch.log(-torch.expm1(-initial_u))))
-			initial_t = self.raw_t.new_full((), 2.0)
-			self.raw_t.copy_(initial_t + torch.log(-torch.expm1(-initial_t)))
 
 	@classmethod
 	def embedding_combination(cls) -> str:
@@ -259,8 +259,7 @@ class SwapEquivariantAbsoluteDifferenceClassificationHead(nn.Module):
 			tie_sum = c_a + c_b
 			tie_diff = (c_a - c_b).abs()
 			u_eff = F.softplus(self.u, beta=100.0)
-			t = 1.0 + F.softplus(self.raw_t)
-			tie_features = torch.addcmul(tie_sum, tie_diff, t, value=-1.0)
+			tie_features = torch.addcmul(tie_sum, tie_diff, self.t, value=-1.0)
 			tie = F.linear(tie_features, u_eff, self.tie_bias.unsqueeze(0))
 		return torch.cat((win_logits, tie), dim=-1)
 
@@ -272,6 +271,7 @@ def create_classification_head(
 	*,
 	compute_dtype: torch.dtype,
 	head_architecture: str = SR2,
+	t: float = DEFAULT_T,
 ) -> nn.Module:
 	"""Construct the current SR2 head by default, retaining legacy definitions."""
 	if head_architecture == PAIRWISE_MLP:
@@ -301,5 +301,6 @@ def create_classification_head(
 			hidden_size,
 			dropout,
 			compute_dtype=compute_dtype,
+			t=t,
 		)
 	raise ValueError(f"Unknown classification head architecture: {head_architecture}.")

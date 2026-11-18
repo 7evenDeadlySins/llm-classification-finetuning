@@ -46,7 +46,6 @@ W_A &= P_A\odot m_P,\qquad W_B=P_B\odot m_P,\\
 z_A &= W_A R,\qquad z_B=W_B R,\\
 C_A &= \max(W_A,0),\qquad C_B=\max(W_B,0),\\
 u_{\mathrm{eff}} &= s\operatorname{softplus}(u/s),\qquad s=0.01,\\
-t &= 1+\operatorname{softplus}(\mathrm{raw\_t}),\\
 z_{\mathrm{tie}} &= b_{\mathrm{tie}}+
 \bigl(C_A+C_B-t|C_A-C_B|\bigr)u_{\mathrm{eff}}.
 \end{aligned}
@@ -54,9 +53,10 @@ $$
 
 Here $L,M\in\mathbb{R}^{D\times h}$ and
 $R,u,u_{\mathrm{eff}}\in\mathbb{R}^{h\times 1}$. PyTorch stores the transposed
-linear weights; raw parameter `u` has shape `[1, h]`, while `raw_t` and
-`tie_bias` are scalars. The effective weights $u_{\mathrm{eff}}$ are positive,
-$t>1$, and $b_{\mathrm{tie}}$ (`tie_bias`) is unconstrained.
+linear weights. Raw parameter `u` has shape `[1, h]`, and scalar
+`tie_bias` is unconstrained. The effective weights $u_{\mathrm{eff}}$ are positive.
+The top-level YAML coefficient $t$ is fixed throughout training and defaults to
+$2\phi+1=2+\sqrt{5}$, where $\phi$ is the golden ratio.
 L/M/R are sampled independently from zero-mean uniform
 distributions $U(-\sqrt{3}\sigma,\sqrt{3}\sigma)$ with these standard deviations:
 
@@ -73,16 +73,14 @@ $U_0\sim U(0.5\mu,1.5\mu)$, then initialize
 $u=s\operatorname{invsoftplus}(U_0/s)$ using the stable inverse
 $\operatorname{invsoftplus}(x)=x+\log(-\operatorname{expm1}(-x))$.
 Thus the initial effective weights reproduce $U_0$.
-Initialize `raw_t` to $\operatorname{invsoftplus}(2)$, giving $t=3$, and
-`tie_bias` to zero. The head has $2Dh+3h+2$ trainable parameters.
-All tie parameters and the win bias use the existing head learning rate and
-weight decay.
+Initialize `tie_bias` to zero. The head has $2Dh+3h+1$ trainable parameters.
+The tie weights, tie bias, and win bias use the head learning rate and weight decay.
 
 Win mask multiplication acts elementwise.
 Each sample's win branches share the standard dropout mask $m_P$ with
 $1/(1-p)$ scaling during training; evaluation disables it.
 The tie branch uses these same masked activations, clamps them at zero, and
-combines their sum with a learned penalty on their elementwise absolute
+combines their sum with a fixed coefficient on their elementwise absolute
 difference. It adds no separate projection, GELU, or dropout mask.
 Swapping inputs exchanges win logits and preserves the tie logit under the same
 masks, because both the clamped sum and absolute difference are symmetric.
@@ -100,25 +98,20 @@ All head parameters remain FP32. The win computation follows the existing head
 mixed-precision policy and converts its logits to FP32. With autocast disabled,
 the tie branch converts masked wins to FP32 before clamping and computes the
 sum, absolute difference, effective weights, $t$, and final linear readout in
-FP32. Gradients flow through `u`, `raw_t`, `tie_bias`, and the reused wins.
+FP32. Gradients flow through `u`, `tie_bias`, and the reused wins.
 Returned logits remain FP32 in the order A-win, B-win, tie.
 
-Checkpoints save `u`, `raw_t`, and `tie_bias` alongside L/M/R and the win bias.
+Checkpoints save `u`, `tie_bias`, and the FP32 `t` buffer alongside L/M/R
+and the win bias.
 The architecture marker is
-`swap_equivariant_abs_diff_v9`, with embedding combination
+`swap_equivariant_abs_diff_v10`, with embedding combination
 `cross_projected_clamped_win_sum_diff`; adapter/head checkpoint schema is v2,
-frozen-head schema is v1, and warmup schema is v5. The marker selects different
-warmup cache keys and rejects earlier checkpoints without converting their
-weights. Exact parameter-name/shape checks additionally reject earlier layouts,
-including v8's `raw_b_tie` and v7's `raw_w_tie`.
-Rebuild those checkpoints with the matching configuration; warmup is regenerated.
+frozen-head schema is v1, and warmup schema is v5. The marker selects new warmup
+entries. To produce v10 weights, rebuild with the selected fixed coefficient.
 The initialization policy is versioned separately as
-`scaled_uniform_clamped_gelu_tie_v5` in the SR2 warmup identity: L/M/R retain
-their scales, $B_1$ starts at zero, and the tie parameters use the initialization
-above. The architecture marker isolates old warmup states without a storage
-schema change.
+`scaled_uniform_clamped_gelu_tie_v6` in the SR2 warmup identity.
 See [warmup identity](caching.md#identity) and the
-[v8-to-v9 migration](migration.md#current-sr2-v9-head-2026-11-15).
+[v10 migration](migration.md#sr2-v10-fixed-tie-coefficient).
 There is no `A/B_swap` setting or orientation averaging for SR2.
 
 ## Hardware and input limits
@@ -217,12 +210,11 @@ offsets/metadata. Current training inputs are checked independently.
 | Head warmup, cache miss | Load cached frozen features and extract missing branches with adapter forwards disabled; train only the head with epoch-based exponential decay from `warmup.learning_rate` to `warmup.build_min_lr` across `warmup.build_epochs`, keeping the rate fixed within each epoch | Evaluate the full training set and, for holdout runs, validation after each epoch using shared features; save completed head/optimizer/RNG state |
 | Head warmup, complete cache hit | Restore compatible head and training state | Inline LoRA skips all warmup work; standalone warmup loads cached features, extracts missing branches, and recomputes both losses without training |
 | Head warmup, lower-epoch cache hit (fixed rate only) | Load/extract frozen features, reconstruct shuffle state, and restore compatible head/optimizer/RNG state; train only remaining epochs | Evaluate after each remaining epoch and save a separate target-epoch cache, preserving the source |
-| Joint training | Clear AdamW moments and step counters once at entry, then train adapters and the main head group at the cosine-decayed base `learning_rate`, with a separate scaled rate for `raw_t` | Fresh backbone extraction and head validation after each joint epoch |
+| Joint training | Clear AdamW moments and step counters once at entry, then train adapters and the head using the same cosine schedule from `learning_rate` | Fresh backbone extraction and head validation after each joint epoch |
 | Full-data build | Same training stages on all original IDs from both partitions | No validation; save adapters/head after the final epoch |
 
 The shared warmup section supplies build epochs, head batch size, initial and
-minimum learning rates, the `raw_t` learning-rate multiplier, extraction budget,
-and smoothing.
+minimum learning rates, extraction budget, and smoothing.
 Inline warmup's remaining model/head settings come from the selected LoRA section.
 `warmup.build_epochs: 0` skips warmup extraction
 and cache I/O. See [standalone versus inline settings](configuration.md#standalone-warmup).
@@ -279,21 +271,8 @@ For warmup identity and restoration details, see [warmup caches](caching.md#lora
 
 Frozen SR2 builds and standalone/inline warmup use exponential decay
 once per epoch. LoRA joint training uses an independent cosine curve once per
-planned optimizer update. Each stage keeps `raw_t` in a separate AdamW
-parameter group, while all other classifier parameters remain in the main head
-group with their existing weight decay.
-
-| Stage | Base head rate | `raw_t` multiplier |
-| --- | --- | --- |
-| Frozen SR2 validation/build | Frozen section's plateau/exponential rate | `SR2_Qwen3_4B.t_lr_multiplier` |
-| Standalone/inline warmup | Warmup section's exponential rate | `warmup.t_lr_multiplier` |
-| LoRA joint training | LoRA section's cosine rate, shared with adapters | `SR2_Qwen3_4B_lora.t_lr_multiplier` |
-
-At every epoch or update, `raw_t_lr = base_head_lr * t_lr_multiplier`. Each
-multiplier defaults independently to `1.0` and must be finite and either `0` or
-at least `1`. A zero multiplier keeps `raw_t` at zero learning rate throughout
-that stage. The schedules derive group rates from the current base rate and
-explicit multipliers, including at a cosine endpoint of zero.
+planned optimizer update. All trainable classifier parameters share one AdamW
+group. The fixed tie coefficient is a buffer.
 
 For head training, let `N = build_epochs`, `L = learning_rate`, and
 `M = build_min_lr` in either the frozen SR2 or warmup section. For `N > 1`:
@@ -322,10 +301,8 @@ coefficient. `warmup.build_epochs: 0` skips the stage without creating a schedul
 Frozen SR2 validation uses ReduceLROnPlateau on the full unsmoothed validation
 loss after each epoch, with `factor: 0.95` and initial `patience: 2` as defaults
 and fixed `threshold=0` and `min_lr=0`, retaining the default `eps=1e-8`.
-Reductions apply to the following epoch. A proposed main head rate reduction
-of at most `eps` is ignored for all groups. Each accepted reduction computes
-the main head rate and then scales `raw_t` from it, preserving the configured
-multiplier.
+Reductions apply to the following epoch. A proposed head rate reduction of at
+most `eps` is ignored.
 Whenever `early_stopping` consecutive epochs fail to strictly lower the overall
 best validation loss, `patience` decrements by `1` in place and the
 early-stopping counter resets while `patience > 0` (preserving model, optimizer,
@@ -339,10 +316,8 @@ and uses no head-state cache; see
 Decaying builds/warmup reuse only exact target-epoch caches. Changing the minimum
 rate or target epoch count changes the full curve and trains from epoch index
 `0` on a cache miss. Lower-epoch continuation remains supported only when
-`build_min_lr = learning_rate`. A non-default warmup `t_lr_multiplier`, including
-zero, participates in cache identity; `1.0` adds no metadata key and retains
-existing cache compatibility. Changing only the joint multiplier preserves
-warmup cache reuse.
+`build_min_lr = learning_rate`. The fixed coefficient `t` participates in
+the head warmup cache identity.
 
 Joint training uses `U = max(1, rows // G)` updates per epoch and `N = epochs * U`
 total updates, using the joint optimizer-group size `G` above.
@@ -367,9 +342,8 @@ skips the parameter update. Micro-batches and evaluation do not advance a
 schedule; warmup does not advance the joint schedule. Packing and short-tail
 merging retain the update counts above; epochs do not restart decay.
 
-At the start of joint training, adapters and the main head group switch to
-`SR2_Qwen3_4B_lora.learning_rate`; the `raw_t` group switches to that rate times
-`SR2_Qwen3_4B_lora.t_lr_multiplier`. They begin a fresh cosine curve whether
+At the start of joint training, adapters and the head switch to
+`SR2_Qwen3_4B_lora.learning_rate`. They begin a fresh cosine curve whether
 warmup was executed, restored from cache, or disabled. This transition clears
 AdamW moments and step counters once while preserving the trained weights,
 parameter groups, GradScaler, and RNG state. Subsequent joint epochs retain

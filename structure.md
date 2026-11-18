@@ -109,7 +109,7 @@ to the batch script; complete local processed data bypasses that source.
 T4 x2, Python 3.13+, offline inference after upload-time dependency setup). It sits
 outside the package and the `model` CLI: it reads the build's
 `adapter.pt` head and `merged/` backbone and writes `submission.csv`. It duplicates the
-SR2 v9 head and the conversation serializer, so changes to
+SR2 head and the conversation serializer, so changes to
 `models/SR2_Qwen3_4B_lora/heads.py` or `models/common/data.py` must be mirrored there.
 Behavior belongs in [Kaggle submission](docs/kaggle-submission.md).
 
@@ -276,25 +276,25 @@ present in a fresh checkout.
    `C_A` and `C_B`, and compute
    `z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff` entirely in
    FP32 with autocast disabled. Here `u_eff = 0.01 * softplus(u / 0.01)` and
-   `t = 1 + softplus(raw_t)`; `tie_bias` is unconstrained. Save raw `u`
-   (`[1, h]`) and scalars `raw_t` and `tie_bias`, retaining their gradients.
+   the fixed coefficient `t` defaults to `2 + √5`. Save raw `u` (`[1, h]`),
+   unconstrained scalar `tie_bias`, and the FP32 `t` buffer.
    Both wins share one dropout mask, inherited by the tie features without a
    separate projection or mask. Architecture
-   `swap_equivariant_abs_diff_v9` uses zero-mean uniform weights with
+   `swap_equivariant_abs_diff_v10` uses zero-mean uniform weights with
    standard deviations `1/sqrt(2D)` for L/M weight blocks and `0.1/sqrt(h)` for
    the win readout, derived from actual layer dimensions. With
    `mean = 0.2 / (3h)`, sample `U_0 ~ U(0.5 * mean, 1.5 * mean)` and initialize
-   `u = 0.01 * invsoftplus(U_0 / 0.01)`. Initialize `raw_t = invsoftplus(2)`
-   so `t = 3`; `tie_bias` and B1 start at zero. Use stable inverse softplus
-   `x + log(-expm1(-x))`. The head has `2Dh + 3h + 2` parameters.
+   `u = 0.01 * invsoftplus(U_0 / 0.01)`. Both `tie_bias` and B1 start at
+   zero. Use stable inverse softplus `x + log(-expm1(-x))`.
+   The head has `2Dh + 3h + 1` trainable parameters.
    Batch A/B inputs once, use one packed L/M projection, one shared win readout,
    and one tie readout, for three linear calls in total.
    Outputs are FP32 `[r_A, r_B, z_tie]`.
-   The v9 marker isolates warmup caches and requires v9 checkpoints. Tensor
-   checks enforce the parameter structure, including rejection of v8's `raw_b_tie`.
+   The v10 marker identifies the fixed-`t` layout for warmup caches and
+   production checkpoints.
    The feature combination marker is `cross_projected_clamped_win_sum_diff`.
    SR2 warmup additionally versions initialization as
-   `scaled_uniform_clamped_gelu_tie_v5`, isolating earlier initialization states
+   `scaled_uniform_clamped_gelu_tie_v6`, isolating earlier initialization states
    without changing storage schemas.
    Frozen SR2 uses this same head and initialization, freezing the backbone and
    training only the head without adapters. Validation uses ReduceLROnPlateau;
@@ -352,13 +352,9 @@ present in a fresh checkout.
    epoch count stays unchanged; a delay at least as large as `epochs` keeps the
    rate fixed throughout, and a single remaining update uses the initial rate.
    Each consumed optimizer group advances the schedule once, including
-   FP16-skipped updates. The separate `raw_t` group always uses the current
-   base head rate times its stage's `t_lr_multiplier`, a finite number equal to
-   `0` or at least `1`, defaulting to `1.0`. Frozen SR2, warmup, and joint LoRA
-   resolve independent multipliers; the joint transition resets rates and switches
-   the `raw_t` multiplier. All schedulers derive rates from explicit group
-   multipliers. Head warmup and
-   frozen SR2 builds derive exponential decay from `build_epochs` and `build_min_lr`,
+   FP16-skipped updates. All trainable head parameters share one AdamW group.
+   Head warmup and frozen SR2 builds derive exponential decay from
+   `build_epochs` and `build_min_lr`,
    setting one rate at the start of each epoch. The first epoch uses the initial
    rate; for multiple epochs, the final epoch uses the minimum exactly. A single
    epoch uses the initial rate. Minimum rates default to the corresponding head
@@ -369,8 +365,7 @@ present in a fresh checkout.
    warmup (`build_epochs: 0`) creates no head scheduler. Frozen SR2 validation
    steps ReduceLROnPlateau once after each complete unsmoothed validation loss,
    with configurable `factor`/initial `patience`, fixed threshold/minimum rate of
-   zero, and default `eps=1e-8`. Apply the epsilon gate to the main head rate;
-   each accepted reduction derives all group rates from that rate.
+   zero, and default `eps=1e-8`. Apply the epsilon gate to the head rate.
    The next epoch retains the resulting rate without an exponential reset;
    learning-rate reductions do not reset the early-stopping counter, while each
    completed `early_stopping` non-improving window with `patience > 0` decrements
@@ -395,9 +390,8 @@ present in a fresh checkout.
    executed warmup epoch evaluates its complete training set with
    final weights, dropout disabled, and warmup smoothing; validation remains
    unsmoothed. Publish head state only after these evaluations succeed.
-   Warmup cache metadata includes `t_lr_multiplier` only for non-default warmup
-   multipliers, including zero, preserving existing default keys and schema v5.
-   Joint multipliers do not affect warmup identity.
+   Warmup cache metadata includes the top-level configuration value `t`.
+   The cached FP32 buffer must match that value.
    Warmup caches retain optimizer state for warmup continuation. On entry to the
    first joint epoch, clear AdamW moments and step counters once, including after
    complete cache hits and partial-cache continuation. Preserve trained weights,

@@ -280,39 +280,39 @@ feature, and head entries. Existing cache files and schema v5 are preserved.
 
 Frozen SR2 builds, LoRA SR2, and standalone warmup write `SR2_Qwen3_4B_lora_warmup/<key>.pt` using
 Skywork features in the shipped presets. All use the
-`swap_equivariant_abs_diff_v9` head architecture and warmup schema v5.
+`swap_equivariant_abs_diff_v10` head architecture and warmup schema v5.
 This head packs L/M into one projection for subtractive cross-projected wins.
 The tie reuses their masked GELU activations, clamps them to nonnegative `C_A`
 and `C_B`, and computes
 `z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff`.
 The entire tie calculation runs in FP32 with autocast disabled, with
-`u_eff = 0.01 * softplus(u / 0.01)` and `t = 1 + softplus(raw_t)`.
+`u_eff = 0.01 * softplus(u / 0.01)` and a fixed `t`.
 Both win branches share one dropout mask, also inherited by the tie features;
 there is no separate tie projection or dropout mask. The architecture marker selects
 new cache keys within the existing namespace; earlier entries remain on disk and
 are not reused or migrated. Exact head/optimizer tensor names and shapes
 additionally reject earlier structures, including v8's `raw_b_tie` and v7's
-`raw_w_tie`, even if their metadata is relabeled. Saved head and optimizer states
-name the tie parameters `u`, `raw_t`, and `tie_bias`.
-Warmup is regenerated for the new architecture.
+`raw_w_tie`, even if their metadata is relabeled. The head state stores
+`u`, `tie_bias`, and the `t` buffer. The optimizer state contains only trainable
+parameters.
 
 SR2 also includes `head_initialization_version` in its warmup metadata, currently
-`scaled_uniform_clamped_gelu_tie_v5`. The full metadata is hashed with SHA-256
+`scaled_uniform_clamped_gelu_tie_v6`. The full metadata is hashed with SHA-256
 to form the cache key and must match the selected source exactly when loading. Earlier
 Xavier-initialized SR2 entries lack this field; harmonic/discrepancy heads use
 `scaled_uniform_zero_discrepancy_v1`. Both select different keys and remain on
 disk without reuse or migration. Initialization versioning
 does not change the head architecture, warmup schema v5, production-checkpoint
-compatibility, or other heads' cache identities. V9 uses scaled uniform weights
+compatibility, or other heads' cache identities. V10 uses scaled uniform weights
 for L/M and the win readout and initializes the win projection bias to zero.
 The initial effective tie weights are sampled from
 `U(0.5 * mean, 1.5 * mean)`, with `mean = 0.2 / (3h)`, and encoded in `u`
-using `0.01 * invsoftplus(U_0 / 0.01)`. Scalar `raw_t` starts at
-`invsoftplus(2)`, giving `t = 3`, and unconstrained `tie_bias` starts at zero.
+using `0.01 * invsoftplus(U_0 / 0.01)`. The fixed `t` defaults to `2 + √5`,
+and the unconstrained `tie_bias` starts at zero.
 See the [head definition](lora.md#swap-equivariant-head) for the stable inverse.
-Together, the v9 architecture and new initialization version isolate v8 and
+Together, the v10 architecture and its initialization version isolate v9 and
 earlier training states without changing storage schemas or migrating old files.
-Compatible v9 entries are shared by frozen SR2 builds and
+Compatible v10 entries are shared by frozen SR2 builds and
 standalone/inline SR2 warmup when all identity fields match. Token, adapter-free feature, and batch-plan
 caches retain their own reuse rules because their representations are unchanged.
 
@@ -344,21 +344,16 @@ remain unchanged; reuse requires the training-label digest described below.
 | --- | --- |
 | Sorted actual training ID set and corresponding labels; supplemental Parquet content when enabled | Validation-only IDs/labels, holdout/build label, source path/Parquet bytes, row order, training text |
 | Exact Hub model/revision or local weight/configuration content, hidden dimensions, tokenizer content, serializer, head architecture, SR2 initialization version, quantization, schema | Local path spelling when contents match |
-| Head dropout, A/B objective, warmup build epochs/batch size/initial rate, exponential schedule version and absolute minimum rate when decay is enabled, seed, weight decay, clipping, nonzero warmup label smoothing, non-default warmup `t_lr_multiplier` | Compute precision, attention, TF32, extraction budget, context ceiling |
-| Non-quantized training identity for active profiles | LoRA rank/alpha/dropout/targets; joint learning rates and `t_lr_multiplier`, epochs, batch size, accumulation, and token controls |
+| Head dropout, A/B objective, fixed SR2 coefficient `t`, warmup build epochs/batch size/initial rate, exponential schedule version and absolute minimum rate when decay is enabled, seed, weight decay, clipping, nonzero warmup label smoothing | Compute precision, attention, TF32, extraction budget, context ceiling |
+| Non-quantized training identity for active profiles | LoRA rank/alpha/dropout/targets; joint learning rates, epochs, batch size, accumulation, and token controls |
 
 Warmup epochs remain part of each stored key. A lower-epoch entry is compatible
 as a continuation source only for fixed-rate training and when every other
 identity field matches.
 
-The effective warmup `t_lr_multiplier` is included under that metadata key only
-when it differs from `1.0`, including when it is `0.0`. Frozen builds use their
-own section's multiplier; standalone and inline warmup use
-`warmup.t_lr_multiplier`. Different warmup multipliers select different head
-states and continuation sources, while the default adds no key and preserves
-existing cache identities and schema v5. Changing only the LoRA joint multiplier
-does not affect warmup identity. Token and frozen-feature caches are independent
-of this head optimization setting.
+SR2 metadata always includes the configured `t`. Different values select
+different head states and continuation sources. Loading checks that the saved
+FP32 buffer matches the configured value.
 
 The required `WarmupCacheContext.training_labels_sha256` hashes original
 `(id, label)` pairs in ascending ID order as a contiguous two-column little-endian

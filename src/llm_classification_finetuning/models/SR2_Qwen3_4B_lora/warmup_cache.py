@@ -120,13 +120,6 @@ class HeadWarmupCache:
 		if config.warmup_build_min_lr != config.warmup_learning_rate:
 			metadata["warmup_lr_schedule"] = "exponential_endpoint_epoch_v2"
 			metadata["warmup_build_min_lr"] = config.warmup_build_min_lr
-		t_lr_multiplier = (
-			config.warmup_t_lr_multiplier
-			if isinstance(config, LoRAModelConfig)
-			else config.t_lr_multiplier
-		)
-		if t_lr_multiplier != 1.0:
-			metadata["t_lr_multiplier"] = t_lr_multiplier
 		# Preserve existing unsmoothed cache identities while isolating smoothed warmup.
 		label_smoothing = (
 			config.warmup_label_smoothing
@@ -139,6 +132,7 @@ class HeadWarmupCache:
 			metadata["head_architecture"] = self._head_architecture
 		if self._head_architecture == SR2:
 			metadata["head_initialization_version"] = SR2_INITIALIZATION_VERSION
+			metadata["t"] = config.t
 		entry = WarmupCacheEntry(metadata, None, self._path_for_metadata(metadata))
 		if refresh:
 			return entry
@@ -236,16 +230,17 @@ class HeadWarmupCache:
 		state = entry.state
 		if state is None:
 			raise ValueError("Cannot restore a missing warmup cache.")
-		parameters = dict(head.named_parameters())
-		if parameters.keys() != state["head_state_dict"].keys() or any(
-			parameter.shape != state["head_state_dict"][name].shape
-			for name, parameter in parameters.items()
+		head_state = state["head_state_dict"]
+		current_state = head.state_dict()
+		if current_state.keys() != head_state.keys() or any(
+			tensor.shape != head_state[name].shape
+			for name, tensor in current_state.items()
 		):
 			raise ModelExecutionError(
 				"The model head does not match its warmup cache context."
 			)
-		head.load_state_dict(state["head_state_dict"], strict=True)
-		for name, parameter in parameters.items():
+		head.load_state_dict(head_state, strict=True)
+		for name, parameter in head.named_parameters():
 			values = state["optimizer_state"][name]
 			if values:
 				# AdamW's non-capturable step counter stays on CPU; moments follow FP32 parameters.
@@ -279,18 +274,28 @@ class HeadWarmupCache:
 				self._config.dropout,
 				compute_dtype=torch.float32,
 				head_architecture=self._head_architecture,
-			).state_dict()
+			)
+		expected_state = expected.state_dict()
+		expected_parameters = dict(expected.named_parameters())
 		head = payload["head_state_dict"]
 		moments = payload["optimizer_state"]
-		if not isinstance(head, dict) or head.keys() != expected.keys():
+		if not isinstance(head, dict) or head.keys() != expected_state.keys():
 			raise ValueError("Incomplete warmup head.")
-		if not isinstance(moments, dict) or moments.keys() != expected.keys():
+		for name, tensor in expected_state.items():
+			self._validate_tensor(head[name], tensor.shape)
+		if self._head_architecture == SR2 and not torch.equal(
+			head["t"], torch.tensor(metadata["t"], dtype=torch.float32)
+		):
+			raise ValueError("Warmup head t does not match its metadata.")
+		if (
+			not isinstance(moments, dict)
+			or moments.keys() != expected_parameters.keys()
+		):
 			raise ValueError("Incomplete warmup optimizer state.")
 		initialized = [bool(values) for values in moments.values()]
 		if any(initialized) and not all(initialized):
 			raise ValueError("Partially initialized warmup optimizer state.")
-		for name, parameter in expected.items():
-			self._validate_tensor(head[name], parameter.shape)
+		for name, parameter in expected_parameters.items():
 			values = moments[name]
 			if not isinstance(values, dict) or (
 				values and values.keys() != {"step", "exp_avg", "exp_avg_sq"}

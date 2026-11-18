@@ -61,7 +61,11 @@ class ModelResultPublisher:
 			"model_name": model_config.model_name,
 			"head_architecture": profile.head_architecture,
 			"embedding_combination": "cross_projected_clamped_win_sum_diff"
-			if profile.head_architecture == "swap_equivariant_abs_diff_v9"
+			if profile.head_architecture
+			in {
+				"swap_equivariant_abs_diff_v9",
+				"swap_equivariant_abs_diff_v10",
+			}
 			else "cross_projected_signed_diff_abs_readout"
 			if profile.head_architecture == "swap_equivariant_abs_diff_v8"
 			else "cross_projected_linear_abs_diff"
@@ -204,7 +208,7 @@ class ModelResultPublisher:
 	@staticmethod
 	def _configuration_snapshot(
 		config: AppConfig, profile: ModelProfile
-	) -> dict[str, dict[str, object]]:
+	) -> dict[str, object]:
 		"""Serialize current-model settings with its required shared warmup section."""
 		model_config = profile.resolve_config(config)
 		sections = {
@@ -213,18 +217,19 @@ class ModelResultPublisher:
 			"gpu": asdict(config.gpu),
 		}
 		model_section = asdict(model_config)
+		t = model_section.pop("t", None)
 		if isinstance(model_config, LoRAModelConfig):
 			if config.warmup is None:
 				raise ModelExecutionError("LoRA results require a 'warmup' section.")
 			sections["warmup"] = {
 				key.removeprefix("warmup_"): value
 				for key, value in asdict(config.warmup).items()
+				if key != "t"
 			}
 			for key in (
 				*LORA_WARMUP_FIELDS,
 				"warmup_extraction_budget",
 				"warmup_label_smoothing",
-				"warmup_t_lr_multiplier",
 			):
 				model_section.pop(key)
 			if model_config.ab_swap == "none":
@@ -233,7 +238,7 @@ class ModelResultPublisher:
 		elif isinstance(model_config, SR2ModelConfig):
 			model_section.pop("ab_swap")
 		sections[profile.config_key] = model_section
-		return {
+		snapshot: dict[str, object] = {
 			section_name: {
 				"A/B_swap" if key == "ab_swap" else key: (
 					str(value)
@@ -246,6 +251,9 @@ class ModelResultPublisher:
 			}
 			for section_name, section in sections.items()
 		}
+		if t is not None:
+			snapshot["t"] = t
+		return snapshot
 
 	def _validate_probabilities(self, predictions: pd.DataFrame) -> None:
 		values = predictions.loc[:, list(self.PROBABILITY_COLUMNS)].to_numpy(

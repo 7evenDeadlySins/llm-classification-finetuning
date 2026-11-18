@@ -81,12 +81,12 @@ together so historical runs retain their intended policy.
 ## Configuration snapshots
 
 The adjacent `config.yaml` uses public input names, includes loaded defaults and
-resolved data paths, and contains only shared sections plus the current model:
+resolved data paths, and contains shared settings plus the current model:
 
-| Run | Included sections |
+| Run | Included keys |
 | --- | --- |
-| Frozen SR2 | `data`, `validation`, `gpu`, `SR2_Qwen3_4B` |
-| LoRA SR2 | `data`, `validation`, `gpu`, `warmup`, `SR2_Qwen3_4B_lora` |
+| Frozen SR2 | `data`, `validation`, `gpu`, `t`, `SR2_Qwen3_4B` |
+| LoRA SR2 | `data`, `validation`, `gpu`, `t`, `warmup`, `SR2_Qwen3_4B_lora` |
 
 LoRA snapshots keep shared warmup controls under `warmup`, omit internal resolved
 fields, and omit `A/B_swap` from both model and warmup sections. Warmup fields use
@@ -137,7 +137,8 @@ cached-head evaluation summaries and empty epoch lists, remain unchanged.
 
 | Profile | `head_architecture` | `embedding_combination` |
 | --- | --- | --- |
-| SR2 | `swap_equivariant_abs_diff_v9` | `cross_projected_clamped_win_sum_diff` |
+| SR2 | `swap_equivariant_abs_diff_v10` | `cross_projected_clamped_win_sum_diff` |
+| Historical SR2 with trainable tie coefficient | `swap_equivariant_abs_diff_v9` | `cross_projected_clamped_win_sum_diff` |
 | Historical SR2 with an absolute scalar readout of signed differences | `swap_equivariant_abs_diff_v8` | `cross_projected_signed_diff_abs_readout` |
 | Historical SR2 with elementwise absolute differences and a negative softplus readout | `swap_equivariant_abs_diff_v7` | `cross_projected_linear_abs_diff` |
 | Historical SR2 with an L-M tie projection | `swap_equivariant_abs_diff_v6` | `cross_projected_linear_abs_diff` |
@@ -151,10 +152,10 @@ cached-head evaluation summaries and empty epoch lists, remain unchanged.
 
 These markers identify model behavior; historical results preserve their
 original values. Combination markers are metrics, not additional YAML options.
-The v9 markers apply to frozen and LoRA SR2 reports. For the nonnegative clamped
+The v10 markers apply to frozen and LoRA SR2 reports. For the nonnegative clamped
 win activations `C_A` and `C_B`, they identify
 `z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff`, where
-`u_eff = 0.01 * softplus(u / 0.01)` and `t = 1 + softplus(raw_t)`.
+`u_eff = 0.01 * softplus(u / 0.01)` and `t` is the fixed coefficient.
 The tie computation is FP32 and `tie_bias` is unconstrained. See the
 [head definition](lora.md#swap-equivariant-head) for initialization and shared
 dropout behavior. Historical report files retain their original markers.
