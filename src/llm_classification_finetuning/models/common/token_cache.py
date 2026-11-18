@@ -297,7 +297,6 @@ class TokenizationCache:
 						):
 							if isinstance(count, int) and count >= 0:
 								counts[key] = count
-					cached_hits = len(counts)
 					missing = [key for key in unique if key not in counts]
 					full_storage = CacheStorage(self.root / f"{namespace}.sqlite3")
 					if missing and full_storage.exists():
@@ -346,10 +345,6 @@ class TokenizationCache:
 			raise ModelExecutionError(
 				f"Could not count complete tokens in {storage.path}: {error}"
 			) from error
-		print(
-			f"Length cache: {cached_hits:,} reused counts, {shared_hits:,} shared encodings, {encoded_count:,} newly counted; {self.root}",
-			flush=True,
-		)
 		return np.asarray([counts[key] for key in keys], dtype=np.int64)
 
 	def _encodings(

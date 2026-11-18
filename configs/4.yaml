@@ -26,7 +26,7 @@ gpu:
 t: 4
 
 SR2_Qwen3_4B:
-  factor: 0.9
+  factor: 0.95
   patience: 2
   early_stopping: 5
   label_smoothing: 0.0
@@ -38,7 +38,7 @@ SR2_Qwen3_4B:
   extraction_budget: 917504
   training_batch_size: 1024
   learning_rate: 0.0001
-  build_min_lr: 0.085 ** 5
+  build_min_lr: 3.205771e-05
   weight_decay: 0.01
   max_grad_norm: 1.0
   random_state: 42
@@ -50,7 +50,7 @@ warmup:
   max_length: 40960
   hidden_size: 128
   dropout: 0.1
-  build_epochs: 22
+  build_epochs: 25
   extraction_budget: 917504
   training_batch_size: 1024
   learning_rate: 0.0001
