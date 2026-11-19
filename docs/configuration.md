@@ -2,78 +2,46 @@
 
 [Documentation index](../README.md)
 
-Use [config.yaml](../config.yaml) or a complete file from [configs/](../configs/)
-as a starting point. This reference describes parser rules; explicit preset
-values live in YAML and may differ between profiles and files.
+Start from [config.yaml](../config.yaml) or a complete preset in [configs/](../configs/). This reference documents parser rules and defaults; explicit preset values live in YAML.
 
 ## Configuration files and paths
 
-Every command accepts `--config PATH`, defaulting to `config.yaml`. Configurations
-do **not** inherit or merge values from the root preset. The entire selected
-file is validated before work begins, including model sections unused by the
-command. Unknown keys are errors.
+- `--config PATH` defaults to `./config.yaml`. Configs do **not** inherit from `config.yaml`; the entire file is validated upfront (including unused model sections), and unknown keys are errors.
+- Relative paths resolve from the **process working directory**, not the YAML parent (`~` expands to home). `.env` loads from the working directory without overriding existing environment variables.
+- Package initialization defaults `PYTORCH_ALLOC_CONF` to `expandable_segments:True` (unless `PYTORCH_ALLOC_CONF` or `PYTORCH_CUDA_ALLOC_CONF` is already set) before importing PyTorch.
 
-Relative paths resolve from the **process working directory**, not the YAML
-file's directory. `~` expands to the user's home directory. `.env` is loaded
-from that working directory without overriding existing environment variables.
-
-Before importing PyTorch, package initialization defaults `PYTORCH_ALLOC_CONF`
-to `expandable_segments:True` unless either `PYTORCH_ALLOC_CONF` or its legacy
-alias `PYTORCH_CUDA_ALLOC_CONF` is already set in the environment or `.env`.
-This process-wide allocator setting requires a fresh process to take effect.
-
-| Setting or artifact | Location / fallback | Controls |
+| Setting / artifact | Default / fallback | Controls |
 | --- | --- | --- |
-| `--config PATH` | `./config.yaml` | Selected complete YAML file |
-| `data.raw_dir` | Required YAML path; root preset `data/raw` | Raw competition CSVs |
-| `data.processed_path` | Required YAML `.parquet` path. Root preset uses `data/processed/external_merged/train_validation.parquet`. | Saved train/validation data, including multipart layout |
-| `data.external_rank_path` | Optional YAML `.csv` path | Ranked external training selection from the saved data |
-| `data.train_supplement_path` | Optional YAML path | Independent supplement (synthetic ties or tie duplicates) for validation training and standalone warmup |
-| `data.build_supplement_path` | Optional YAML path | Independent supplement for full-data model builds |
-| `MODEL_PATH` | Optional environment or `.env`; missing/blank uses native HF settings | Downloaded model/config/tokenizer cache |
-| `HF_HUB_OFFLINE` | Environment or `.env`; runtime template and Colab validation/build use `1` | Load required HF files locally without Hub requests; use `0` in a separate download process to fill missing files |
-| `CACHE_PATH` | Environment or `.env`; missing/blank uses `./cache` | Tokens, frozen/warmup features, LoRA batch plans, and head-warmup states |
-| `RESULT_PATH` | Environment or `.env`; missing/blank uses `./results` | Validation runs, comprehensive reports, and batch-run logs |
-| Production checkpoints | `./models/SR2_Qwen3_4B/`, `./models/SR2_Qwen3_4B_lora/` | Frozen head or LoRA adapter/head files |
+| `--config PATH` | `./config.yaml` | Complete YAML config |
+| `data.raw_dir` | Required (`data/raw` in root preset) | Raw competition CSVs |
+| `data.processed_path` | Required `.parquet` path | Saved train/validation data (or multipart layout) |
+| `data.external_rank_path` | `null` (optional `.csv`) | Ranked external training selection |
+| `data.train_supplement_path` | `null` (optional `.parquet`) | Supplement for validation training and standalone warmup |
+| `data.build_supplement_path` | `null` (optional `.parquet`) | Supplement for full-data builds |
+| `MODEL_PATH` | Optional env / `.env` | Native Hugging Face model/tokenizer cache |
+| `HF_HUB_OFFLINE` | Env / `.env` (`1` in Colab/runtime) | Load local HF files without Hub requests (`0` to download) |
+| `CACHE_PATH` | `./cache` | Tokens, features, LoRA batch plans, and head-warmup states |
+| `RESULT_PATH` | `./results` | Validation runs (`MODEL-<ts>/`), reports (`comprehensive/`), batch logs (`logs/`) |
+| Production checkpoints | `./models/SR2_Qwen3_4B/`, `./models/SR2_Qwen3_4B_lora/` | Frozen head or LoRA adapter/head + merged backbone |
 
-`RESULT_PATH` follows the same path rules as `CACHE_PATH`: surrounding
-whitespace is stripped, `~` expands, and relative values resolve from the process
-working directory. Validation runs are direct children of this root; comprehensive
-reports and batch logs use `comprehensive/` and `logs/`.
-The batch script loads `.env` and resolves relative paths from its project root,
-matching its child commands even when launched from another directory.
-
-Changing these settings selects storage for subsequent reads and writes; it does
-not move existing files. YAML data paths and production checkpoint locations are
-independent. `DATA_PATH` is unused.
-
-For example, `uv run model SR2-Qwen3-4B-lora --config configs/2.yaml` still
-resolves relative data and output paths from the project root when run there.
-See [cache layout](caching.md) and [Colab persistence](colab.md).
+Changing storage paths affects subsequent reads/writes only (does not move files). `DATA_PATH` is unused. Batch scripts load `.env` and resolve relative paths from the project root. See [cache layout](caching.md) and [Colab persistence](colab.md).
 
 ## Configuration sections
 
 | Section | Required when | Responsibility |
 | --- | --- | --- |
 | `data` | Always | Competition and data paths |
-| `validation` | Always | Saved holdout fraction, seed, and balance tokenizer |
+| `validation` | Always | Holdout fraction, seed, and balance tokenizer |
 | `gpu` | Always | Training device, precision, and attention |
 | `SR2_Qwen3_4B` | Selecting `SR2-Qwen3-4B` | Frozen Skywork and independent SR2 head training |
 | `SR2_Qwen3_4B_lora` | Selecting `SR2-Qwen3-4B-lora` | Skywork LoRA and swap-equivariant comparison head |
-| `warmup` | LoRA section is present, or selecting `warmup --build` | Shared warmup controls and standalone warmup model |
+| `warmup` | `SR2_Qwen3_4B_lora` is present, or selecting `warmup --build` | Shared warmup controls and standalone warmup model |
 
-Model sections may be absent for data/reporting or standalone warmup;
-`model ALL` requires at least one configured model supporting the selected mode.
-`warmup` is not part of `ALL`. Frozen SR2 is independent of both other sections.
-SR2 LoRA inherits the warmup controls listed under
-[standalone warmup](#standalone-warmup) from `warmup`. Retired Qwen model
-sections are unknown keys; see [migration](migration.md#retired-profiles).
+Model sections may be omitted for data/reporting or standalone warmup; `model ALL` requires at least one configured model supporting the mode (`warmup` is excluded from `ALL`). `SR2_Qwen3_4B` is independent of `warmup` and `SR2_Qwen3_4B_lora`. Retired Qwen sections are rejected; see [migration](migration.md#retired-profiles).
 
 ## Required fields and defaults
 
-All fields below are required unless a default is shown. Numerical values must
-be finite, integers must be YAML integers, and Boolean fields must be actual
-Booleans. Unquoted strings such as `bf16`, `sdpa`, and `cuda:0` are valid.
+All fields are required unless a default is shown. Numbers must be finite; integers/Booleans must match YAML types. Unquoted strings (`bf16`, `sdpa`, `cuda:0`) are valid.
 
 ### Data and validation
 
@@ -82,21 +50,16 @@ Booleans. Unquoted strings such as `bf16`, `sdpa`, and `cuda:0` are valid.
 | `data.competition` | Nonempty string |
 | `data.raw_dir` | Nonempty path |
 | `data.processed_path` | Nonempty path ending in `.parquet` |
-| `data.external_rank_path` | Nonempty path ending in `.csv` or `null`. Default `null`. Selects ranked external rows to approximate the Kaggle token volume and match the tie share by row count in the active training scope. The saved Parquet must include `source`. See [ranked external selection](data-preparation.md#ranked-external-training-selection) |
-| `data.train_supplement_path` | Separate `.parquet` path or `null`; default `null`. Appended to training during validation and standalone warmup; frozen validation is unchanged |
-| `data.build_supplement_path` | Separate `.parquet` path or `null`; default `null`. Full-data builds append this artifact instead of the train supplement. Both supplement paths must differ from the real table and use separate, non-nested directories |
+| `data.external_rank_path` | `.csv` path or `null` (default `null`). Matches Kaggle token volume and tie share; saved Parquet must include `source`. See [ranked external selection](data-preparation.md#ranked-external-training-selection) |
+| `data.train_supplement_path` | Separate `.parquet` path or `null` (default `null`) |
+| `data.build_supplement_path` | Separate `.parquet` path or `null` (default `null`); must use separate, non-nested directories from `train_supplement_path` and `processed_path` |
 | `validation.random_state` | Integer |
 | `validation.validation_fraction` | Number in `(0, 1)`; default `0.2` |
-| `validation.tokenizer_name` | Hub ID or local tokenizer directory with a chat template; default `Skywork/Skywork-Reward-V2-Qwen3-4B` |
-| `validation.tokenizer_revision` | Nonempty revision string or `null`; default `null` |
+| `validation.tokenizer_name` | Hub ID or local tokenizer dir with chat template; default `Skywork/Skywork-Reward-V2-Qwen3-4B` |
+| `validation.tokenizer_revision` | Nonempty revision or `null`; default `null` |
 | `validation.max_token_deviation` | Number in `(0, 1)`; default `0.005` |
 
-The tokenizer is used for preparation independently of optional model sections.
-The shipped presets select the SR2 tokenizer and pin revision
-`fd958fef475f323f4e6b195930e3dd918485c668` for reproducible chat-template token
-counts. If you change the training tokenizer and rebuild the split, update this
-tokenizer too. Preparation renders the complete conversation before counting,
-without adding a second set of special tokens.
+Presets pin `validation.tokenizer_revision` to `fd958fef475f323f4e6b195930e3dd918485c668` for reproducible chat-template token counts (`add_special_tokens=False`).
 
 ### GPU fields
 
@@ -109,317 +72,93 @@ without adding a second set of special tokens.
 
 ### Model fields
 
-Set `t: 4.5` at the same indentation as `data` and `gpu` to override the
-default fixed tie coefficient. The selected value applies throughout training
-and evaluation, and builds save it with the head for inference.
-The remaining model fields belong in the sections shown below.
+Set top-level `t` (same indentation as `data`/`gpu`) to override the default fixed tie absolute-difference coefficient (`√5`, finite FP32). It applies to frozen SR2, LoRA, and warmup, and is saved in built heads.
 
 | Fields | Sections | Rule / parser default |
 | --- | --- | --- |
-| `model_name` | All model sections and `warmup` | Nonempty Hub ID or local model directory |
-| `max_length`, `hidden_size`, `extraction_budget` | All model sections and `warmup` | Positive integers; `hidden_size` is the classifier width |
-| `dropout` | All model sections and `warmup` | Number in `[0, 1)` |
-| `weight_decay` | All model sections and `warmup` | Number at least `0` |
-| `random_state` | All model sections and `warmup` | Integer |
-| `dataloader_workers` | All model sections and `warmup` | Integer at least `0` |
-| `label_smoothing` | All model sections and `warmup` | Number in `[0, 1]`; default `0.0` |
-| `training_batch_size` | Frozen SR2, LoRA, and `warmup` | Positive integer |
-| `learning_rate` | Frozen SR2, LoRA, and `warmup` | Positive finite number or a string power expression resolving to one; see below |
-| `t` | Top-level YAML, shared by frozen SR2, LoRA, and `warmup` | Fixed tie absolute-difference coefficient. Accepts a finite number in FP32 range and defaults to `√5` |
-| `epochs` | LoRA joint training | Required positive integer |
-| `build_epochs` | Frozen SR2 and `warmup` | Positive integer for frozen SR2 builds; optional or `null` for frozen SR2 validation; required non-negative integer for warmup, where `0` disables the inline stage |
-| `early_stopping` | Frozen SR2 validation | Positive integer; default `7`; non-improving epoch window per `patience` stage before stepping `patience` down by `1` or stopping when `patience = 0` |
-| `factor` | Frozen SR2 validation | Finite number in `(0, 1)`; default `0.95`; multiply the learning rate by this factor when validation loss plateaus |
-| `patience` | Frozen SR2 validation | Non-negative integer; default `2`; initial ReduceLROnPlateau patience (reduces the rate after more than this many consecutive non-improving epochs); steps down by `1` toward `0` across consecutive `early_stopping` windows |
+| `model_name` | All models, `warmup` | Nonempty Hub ID or local model directory |
+| `max_length`, `hidden_size`, `extraction_budget` | All models, `warmup` | Positive integers (`hidden_size` = classifier width) |
+| `dropout` | All models, `warmup` | Number in `[0, 1)` |
+| `weight_decay` | All models, `warmup` | Number `>= 0` |
+| `random_state` | All models, `warmup` | Integer |
+| `dataloader_workers` | All models, `warmup` | Integer `>= 0` |
+| `label_smoothing` | All models, `warmup` | Number in `[0, 1]`; default `0.0` |
+| `training_batch_size` | Frozen SR2, LoRA, `warmup` | Positive integer |
+| `learning_rate` | Frozen SR2, LoRA, `warmup` | Positive finite number or power expression string |
+| `max_grad_norm` | Frozen SR2, LoRA, `warmup` | Positive number |
+| `epochs` | LoRA joint | Positive integer |
 | `head_inference_batch_size`, `gradient_accumulation_steps` | LoRA | Positive integers |
-| `min_lr_ratio` | LoRA | Number in `[0, 1]`; default `0.125`; minimum joint learning rate as a fraction of `learning_rate` |
-| `lr_decay_delay_epochs` | LoRA | Non-negative integer; default `0`; number of initial joint epochs at fixed `learning_rate` before cosine decay; values at least `epochs` keep the rate fixed throughout |
-| `build_min_lr` | Frozen SR2 builds and `warmup` | Finite absolute learning rate in `(0, learning_rate]`, supplied as a number or string power expression; defaults to that head stage's `learning_rate / 5`; used by the final epoch when `build_epochs > 1` |
-| `max_grad_norm` | Frozen SR2, LoRA, and `warmup` | Positive number |
+| `min_lr_ratio` | LoRA | Number in `[0, 1]`; default `0.125` |
+| `lr_decay_delay_epochs` | LoRA | Integer `>= 0`; default `0` (initial joint epochs at fixed `learning_rate` before cosine decay) |
 | `lora_rank`, `lora_alpha` | LoRA | Positive integers |
 | `lora_dropout` | LoRA | Number in `[0, 1)` |
 | `lora_target_modules` | LoRA | Nonempty list of unique nonempty strings |
-| `gradient_checkpointing_threshold`, `gradient_checkpointing_budget` | LoRA | Integers at least `0`; each defaults to `0` |
+| `gradient_checkpointing_threshold`, `gradient_checkpointing_budget` | LoRA | Integers `>= 0`; default `0` |
+| `build_epochs` | Frozen SR2, `warmup` | Positive int for frozen SR2 builds (optional/`null` for validation); non-negative int for `warmup` (`0` disables inline warmup) |
+| `build_min_lr` | Frozen SR2 builds, `warmup` | Finite number or power expression in `(0, learning_rate]`; default `learning_rate / 5` |
+| `early_stopping` | Frozen SR2 validation | Positive int; default `7` (non-improving epochs per `patience` stage) |
+| `factor` | Frozen SR2 validation | Finite number in `(0, 1)`; default `0.95` (ReduceLROnPlateau multiplier) |
+| `patience` | Frozen SR2 validation | Integer `>= 0`; default `2` (initial ReduceLROnPlateau patience; decrements by `1` per `early_stopping` window) |
 
-`warmup` additionally requires `build_epochs` (integer at least `0`),
-`training_batch_size` (positive integer), `learning_rate` (as above), and
-`max_grad_norm` (positive number). Fields inside `warmup` have no `warmup_`
-prefix. Neither frozen SR2 nor `warmup` accepts the old `epochs` or `lr_decay_base`
-fields. Warmup also rejects the former prefixed names, `min_lr_ratio`, and `A/B_swap`.
+**Power expressions for `learning_rate` / `build_min_lr`:** Both fields accept numeric literals or strings using `+`/`-` unary ops, parentheses, and right-associative `**` (e.g., `"10 ** -4.5"`, `"10 ** (-2 ** 2)"` = `0.0001`). Binary `+`/`-`, variables, calls, and non-positive/overflowing results are rejected without `eval`.
 
-`learning_rate` and `build_min_lr` accept ordinary YAML numbers and strings
-containing real numeric literals (integers, decimals, or scientific notation),
-unary `+`/`-`, parentheses, and `**`. For example, these are independent valid
-field values:
+**Rejected legacy fields:** Both SR2 sections reject `head_learning_rate`, `A/B_swap`, and `warmup_*` keys. Frozen SR2 and `warmup` reject `epochs`, `lr_decay_base`, `min_lr_ratio`, and prefixed `warmup_*` names. See [migration](migration.md).
 
-```yaml
-learning_rate: 0.0001
-```
+#### Learning-rate schedules
 
-```yaml
-learning_rate: "1e-4"
-```
-
-```yaml
-learning_rate: "10 ** -4.5"
-```
-
-```yaml
-learning_rate: "10 ** (-2 ** 2)"
-```
-
-Expressions follow Python's power precedence and right associativity:
-`"10 ** -2 ** 2"` means `10 ** (-(2 ** 2))` and resolves to `0.0001`.
-Other operators, including binary addition/subtraction, variables, function
-calls, Booleans, and complex values are rejected. Empty or malformed expressions,
-overflow, non-finite intermediate values, and final values at or below zero are
-configuration errors naming the affected section and field.
-
-The parser evaluates literals and intermediate results as floats without `eval`.
-Validated config objects, effective YAML snapshots, cache identities, and checkpoint
-metadata use the calculated numeric values. An omitted `build_min_lr` defaults to
-the calculated initial learning rate divided by five. Other numeric fields retain
-their existing input rules. Both rate fields can use expressions in the same
-frozen SR2 or `warmup` section:
-
-```yaml
-learning_rate: "10 ** -3"
-build_min_lr: "10 ** -4"
-```
-
-Both SR2 sections reject `head_learning_rate`, `A/B_swap`, and the
-`warmup_*` optimization keys.
-Internal `ab_swap`, `warmup_extraction_budget`, and `warmup_label_smoothing` are
-not YAML fields. See [migration](migration.md) for retired keys.
-
-`SR2_Qwen3_4B` trains only the SR2 head with mode-specific learning-rate decay,
-using `training_batch_size` for both optimization groups and head inference.
-It accepts the common model fields above, `build_epochs`, `early_stopping`, `factor`, `patience`,
-`training_batch_size`, `learning_rate`, `build_min_lr`, and
-`max_grad_norm`; it rejects LoRA,
-joint-training, and `warmup_*` controls.
-Its independent section needs neither `warmup` nor `SR2_Qwen3_4B_lora`.
-Shipped values were copied once from each preset's warmup settings; changing
-either section later does not modify the other. Compatible features and build
-training states share the [warmup caches](caching.md#frozen-sr2-head-training).
-
-Frozen SR2 validation ignores `build_epochs` as a training limit and starts a fresh
-head at epoch `1`. After each epoch, `ReduceLROnPlateau` first consumes the
-unrounded, unsmoothed holdout log loss with the current `patience`, then the run
-compares that same full-precision loss with the lowest loss so far (not the
-rounded log value). A strictly lower loss updates the best loss and predictions
-and resets the consecutive non-improvement count to `0` without restoring
-`patience`; an equal or higher loss increments the count. The first epoch
-establishes the best loss with count `0`. When the count reaches `early_stopping`
-while current `patience > 0`, `patience` decreases by `1` in place on the
-scheduler, the early-stopping count resets to `0`, and training continues while
-preserving the model, optimizer, current learning rate, and all other scheduler
-state (such as `best`, `num_bad_epochs`, and `cooldown_counter`). When the count
-reaches `early_stopping` at `patience = 0`, training stops and publishes the
-overall best epoch's predictions and loss, retaining the earliest epoch on a tie.
-For example, initial `patience: 2` and `early_stopping: 7` run stages
-`2 -> 1 -> 0` and stop 21 epochs after the best epoch if no further improvement
-occurs. There is no fixed epoch cap or minimum improvement threshold. Boolean,
-non-integer, and non-positive `early_stopping` values are rejected. A build requires
-positive `build_epochs` before input or GPU preparation and does not use early stopping.
-
-Validation uses PyTorch `ReduceLROnPlateau` with `mode="min"`, `factor` (default
-`0.95`), initial `patience` (default `2`), and fixed `threshold=0` and `min_lr=0`.
-The first epoch uses `learning_rate`; after each complete validation evaluation,
-the scheduler consumes the unrounded, unsmoothed loss once and sets the rate for
-the next epoch. At `patience: 2`, the third consecutive non-improving epoch
-triggers a reduction; at `patience: 1`, the second consecutive non-improving epoch
-triggers one; at `patience: 0`, every non-improving epoch triggers one. Strictly
-lower losses count as improvements; ties do not. Rate reductions do not reset the
-early-stopping counter, and early-stopping stage transitions preserve scheduler
-state other than decrementing `patience`. Other scheduler parameters retain
-PyTorch defaults, including `cooldown=0`, `threshold_mode="rel"`, and `eps=1e-8`.
-A proposed head rate reduction of at most `eps` is ignored. Boolean values are
-rejected for `factor` and `patience`.
-`threshold`, `min_lr`, and `eps` are not YAML fields. Effective `config.yaml`
-snapshots record the configured initial `patience`. Validation does not apply
-`build_epochs` or `build_min_lr`; builds do not use `factor` or `patience`.
-
-Joint training uses `learning_rate` as the base rate for both adapters and the
-classifier head.
-`lr_decay_delay_epochs` keeps the first configured number of joint epochs at that
-initial rate, then one cosine curve spans the remaining planned optimizer updates.
-The total `epochs` stays unchanged, and head warmup has its own independent
-schedule. The delay defaults to `0`, preserving the original curve; values at
-least `epochs` keep the rate fixed throughout joint training. When at least two
-updates remain after the delay, the first uses the initial rate and the final
-uses `learning_rate * min_lr_ratio`. A single remaining update uses the initial
-rate. `min_lr_ratio: 0` decays to zero, while `1` keeps the rate fixed. Omitting
-`min_lr_ratio` uses `0.125`.
-
-Frozen SR2 builds derive exponential decay from their independent `build_epochs`
-and `build_min_lr`. Standalone and inline head warmup use the corresponding fields
-from `warmup`. For `N = build_epochs > 1`, initial rate `L`, and minimum rate `M`,
-the scheduler computes `decay_rate = (ln(L) - ln(M)) / (N - 1)` and applies
-`lr = L * exp(-decay_rate * epoch_index)` at each epoch's start. The zero-based
-index spans `0` through `N - 1`. The first and final epochs explicitly use `L`
-and `M`, respectively; every update within an epoch uses the same rate.
-A single epoch uses the initial rate. Setting `build_min_lr` equal to
-`learning_rate` keeps the rate fixed. Disabling inline warmup with
-`warmup.build_epochs: 0` creates no head scheduler.
-
-Omitting `build_min_lr` defaults it to the corresponding head initial rate divided
-by five. Invalid expressions and zero, negative, non-finite, Boolean, or
-above-initial values are rejected. Inline warmup compares the calculated value
-with `warmup.learning_rate`, independently of the joint learning rate.
-Configuration objects, effective snapshots, checkpoint
-training metadata, and decaying cache identities retain the minimum rate rather
-than a derived coefficient. See [learning-rate decay](lora.md#learning-rate-decay)
-and [migration](migration.md).
+- **Frozen SR2 validation (`ReduceLROnPlateau` + staged `early_stopping`):** Ignores `build_epochs` and `build_min_lr`; starts a fresh head at epoch 1. After each epoch, `ReduceLROnPlateau` (`mode="min"`, `threshold=0`, `min_lr=0`, `eps=1e-8`) consumes the unrounded, unsmoothed validation loss and updates the rate for the next epoch. A strictly lower loss updates `best_epoch` and resets the early-stopping counter to `0` (without restoring `patience`); equal/higher losses increment the counter (LR reductions do not reset it). Reaching `early_stopping` while `patience > 0` decrements `patience` by `1` in place, resets the early-stopping counter to `0`, and preserves all other model/optimizer/scheduler state. Reaching `early_stopping` at `patience = 0` stops training and publishes `best_epoch` (earliest on a tie). Example: `patience: 2`, `early_stopping: 7` steps `2 -> 1 -> 0` and stops 21 epochs after the best epoch without improvement.
+- **Frozen SR2 builds & `warmup` (exponential decay):** Uses `N = build_epochs`, `L = learning_rate`, and `M = build_min_lr`. For `N > 1`, epoch `i` (`0..N-1`) sets `lr = L * exp(-((ln(L) - ln(M)) / (N - 1)) * i)` at epoch start, hitting `L` on epoch 1 and `M` on epoch `N`. `N = 1` uses `L`; `M = L` keeps the rate fixed; `warmup.build_epochs: 0` creates no scheduler.
+- **LoRA joint training (delayed cosine decay):** Holds `learning_rate` for `lr_decay_delay_epochs` epochs (values `>= epochs` keep it fixed), then applies one cosine curve to `learning_rate * min_lr_ratio` across the remaining planned updates (single remaining update uses `learning_rate`). See [learning-rate decay](lora.md#learning-rate-decay).
 
 ## Label smoothing
 
-For three classes, training uses the target
-`(1 - label_smoothing) * one_hot + label_smoothing / 3`.
-This applies to warmup and joint-training cross entropy.
-Warmup's epoch-end training-set inference uses the same smoothing as its
-training objective. Validation and reported validation metrics use unsmoothed
-log loss.
+Cross-entropy uses `(1 - label_smoothing) * one_hot + label_smoothing / 3` for training (and warmup's epoch-end training-set evaluation). Validation and reported validation metrics are always unsmoothed.
 
-| Setting | Applies to |
-| --- | --- |
-| `SR2_Qwen3_4B.label_smoothing` | Frozen SR2 head training and epoch-end training-set evaluation |
-| `SR2_Qwen3_4B_lora.label_smoothing` | SR2 joint training only |
-| `warmup.label_smoothing` | All inline and standalone head warmup |
-
-Omitting warmup smoothing gives `0.0` independently of SR2 joint training.
-Nonzero warmup smoothing participates in the warmup cache key.
+- `SR2_Qwen3_4B.label_smoothing`: Frozen SR2 training and epoch-end train evaluation.
+- `SR2_Qwen3_4B_lora.label_smoothing`: SR2 joint training only.
+- `warmup.label_smoothing`: Inline and standalone head warmup (default `0.0`; participates in warmup cache keys when nonzero).
 
 ## Standalone warmup
 
-SR2 takes exactly these controls from `warmup`:
+`SR2_Qwen3_4B_lora` takes only these controls from `warmup`:
 
 | `warmup` field | Effect inside a LoRA run |
 | --- | --- |
-| `build_epochs` | Target head-only epochs; exponential decay reuses only the exact target, while fixed-rate training can continue from a compatible lower epoch; `0` disables warmup and its cache I/O |
-| `training_batch_size` | Head forward batch size during warmup |
+| `build_epochs` | Head-only epochs (`0` disables warmup and its cache I/O) |
+| `training_batch_size` | Warmup head forward batch size |
 | `learning_rate` | Initial warmup head learning rate |
-| `build_min_lr` | Absolute final-epoch head learning rate; defaults to `warmup.learning_rate / 5`; equal to the initial rate for fixed-rate training; independent of frozen SR2 and joint `min_lr_ratio` |
+| `build_min_lr` | Final-epoch warmup rate (default `warmup.learning_rate / 5`; equal to `learning_rate` for fixed-rate) |
 | `extraction_budget` | Warmup backbone extraction token budget |
 | `label_smoothing` | Warmup training objective |
 
-Inline LoRA warmup uses the selected LoRA section's own `model_name`,
-`max_length`, head width/dropout, weight decay, clipping, seed, and workers.
-The corresponding fields in `warmup` configure **only** `model warmup --build`.
-They do not override SR2's model/head settings.
-
-Standalone warmup requires positive `warmup.build_epochs` and uses the saved train
-partition for training, the SR2 comparison head, and original rows only.
-It also reads validation for evaluation. Epoch-end inference reports the full
-training loss with warmup smoothing and validation's unsmoothed log loss;
-both inference loaders use `warmup.training_batch_size`. Complete cache hits recompute
-both losses from the restored head and current data without training.
-Lower-epoch hits train and evaluate only the remaining epochs before saving a
-separate target cache; all other identity fields must match.
-It writes `SR2_Qwen3_4B_lora_warmup/`, sharing the inline SR2 namespace. The shipped
-presets set `warmup.model_name` to `Skywork/Skywork-Reward-V2-Qwen3-4B`.
-Adapter-free features are cached separately under `embedding_cache/` and shared
-with inline warmup by token content and backbone computation identity. Head
-settings and training IDs do not affect this feature cache; see
-[warmup features](caching.md#warmup-features).
-
-Matching shared controls is insufficient for cache reuse: model/head settings
-and training IDs/labels must also match. The current root preset (`config.yaml`)
-and bundled experiment presets (`configs/1.yaml`–`7.yaml`, `configs/l1.yaml`–`l8.yaml`)
-align standalone model/head settings with their SR2 validation settings.
-If editing either section, keep those settings aligned when reuse is intended.
-A train-partition cache differs from the normal full-data build's training ID set.
-See [complete compatibility rules](caching.md#lora-head-warmup).
+Inline LoRA warmup takes `model_name`, `max_length`, head width/dropout, `weight_decay`, `max_grad_norm`, `random_state`, and `dataloader_workers` from the LoRA section; those fields in `warmup` apply **only** to `uv run model warmup --build`. Keep them aligned with `SR2_Qwen3_4B_lora` (as in all bundled presets) if you want standalone warmup caches to be reused inline. See [cache compatibility](caching.md#lora-head-warmup).
 
 ## Holdout token balance
 
-Preparation measures canonical rows and tokens before A/B augmentation. With
-validation fraction `f`, the criterion is:
-
-`abs(validation_tokens / (all_tokens * f) - 1) < max_token_deviation`
-
-Row counts use the same relative formula with a fixed strict limit of `0.005`.
-At `f = 0.2`, the default means less than 0.5% relative error around the 20%
-target. Whole prompt-group exchanges preserve the initial class and row counts;
-preparation fails before publication if balance cannot be reached.
-See [data preparation](data-preparation.md#one-shared-trainvalidation-split).
+Measured on original rows before augmentation: `abs(validation_tokens / (all_tokens * f) - 1) < max_token_deviation` (default `0.005`), and row-count relative deviation `< 0.005`. See [data preparation](data-preparation.md#one-shared-trainvalidation-split).
 
 ## Extraction token budgets
 
-`extraction_budget` limits padded tokens in no-gradient backbone micro-batches:
+`extraction_budget` caps padded tokens (`branch_count * longest_branch_length`) in no-gradient backbone micro-batches:
+- `warmup.extraction_budget`: Inline and standalone warmup extraction.
+- `SR2_Qwen3_4B_lora.extraction_budget`: Joint-validation extraction (`head_inference_batch_size` sets pair batch size for head inference).
+- `SR2_Qwen3_4B.extraction_budget`: Frozen SR2 missing-branch extraction (`training_batch_size` sets head training/inference batch size).
 
-| Setting | Used for |
-| --- | --- |
-| `warmup.extraction_budget` | Inline LoRA and standalone warmup extraction |
-| A LoRA section's `extraction_budget` | Its joint-validation extraction |
-| A LoRA section's `head_inference_batch_size` | Head inference after extraction, including inline warmup train/validation evaluation; counts pairs, not tokens |
-| `warmup.training_batch_size` | Standalone warmup head training and train/validation inference batch size |
-| `SR2_Qwen3_4B.extraction_budget` | Frozen SR2 missing-branch feature extraction |
-| `SR2_Qwen3_4B.training_batch_size` | Frozen SR2 head training and train/validation inference batch size |
-
-Extraction sorts individual A/B branches by descending length, breaking ties by
-original branch index. Batch cost is `branch_count * longest_branch_length`;
-equality with the budget is allowed. A branch longer than the budget runs alone,
-so the budget is **not a hard memory or input-length cap**. The remaining branches
-are packed by comparing two candidates, minimizing micro-batch count first and
-then total padded tokens:
-
-- A suffix dynamic program finds the optimal contiguous partition in the sorted
-  order. Equal DP scores retain the first enumerated cut, shortest prefix first.
-- The retained best-fit candidate greedily fills batches in descending branch
-  order. Exact ties between candidates retain best-fit.
-
-Oversized singletons contribute the same fixed count and cost to both candidates.
-When all eligible branches fit in one batch, that result is returned directly.
-The DP uses linear extra space and quadratic time in the worst case; descending
-lengths make each interval's maximum its first length and bound feasible cuts by
-the budget. This shared sampler also handles retained frozen-model extraction.
-Features are scattered back to their original pair positions.
-
-LoRA rejects empty or over-limit branches and never truncates. Extraction plans
-stay in memory. Changing the extraction budget does not invalidate tokens,
-warmup features, warmup states, or checkpoints. Historical frozen caches are
-described in
-[caching](caching.md#frozen-embeddings).
+Branches are sorted by descending length (ties by original index); single branches exceeding the budget run alone (**not** a hard memory or length cap). Remaining branches are packed via the better of suffix DP (contiguous cuts) and best-fit (minimizing batch count, then total padded tokens; ties keep best-fit). Changing `extraction_budget` does not invalidate caches.
 
 ## Joint-training packing
 
-These two LoRA controls serve different purposes:
-
 | Control | `0` | Positive value |
 | --- | --- | --- |
-| `gradient_checkpointing_threshold` | Initial fixed-size micro-batches; checkpoint all joint batches | Pack initial batches by total padded A/B tokens; checkpoint only batches above the threshold |
-| `gradient_checkpointing_budget` | Disable the second packing pass | Combine checkpointed singletons inside each optimizer update, within this total padded A/B token budget |
+| `gradient_checkpointing_threshold` | Fixed `training_batch_size` micro-batches; checkpoint all joint batches | Pack initial batches under `P <= threshold`; checkpoint only batches with `P > threshold` |
+| `gradient_checkpointing_budget` | Disable second packing pass | Merge checkpointed singletons inside each optimizer update under `P <= budget` |
 
-Both controls use `rows * (longest_A + longest_B)`, with each branch padded
-independently. Joint training retains both branch graphs until one backward pass.
-Joint updates target `training_batch_size * gradient_accumulation_steps` rows.
-A short tail merges into the preceding full update and uses the combined row
-count for loss normalization. With positive token packing, micro-batch sizes can
-exceed `training_batch_size`. When `gradient_checkpointing_threshold > 0`,
-`gradient_checkpointing_budget` must exceed `2 * gradient_checkpointing_threshold`
-to merge any checkpointed singletons; when `gradient_checkpointing_threshold: 0`,
-use `training_batch_size: 1` so initial micro-batches are singletons eligible for
-budget repacking. Warmup and inference disable checkpointing.
-See [the packing algorithm](lora.md#optional-token-budget-training-batches) and
-[memory tuning](lora.md#memory-tuning) before changing these values.
+Here `P = rows * (longest_A + longest_B)` with independent right padding. Updates target `G = training_batch_size * gradient_accumulation_steps` rows (short tails merge into the preceding full update). When `threshold > 0`, `budget` must exceed `2 * threshold` to merge singletons; when `threshold: 0`, use `training_batch_size: 1` for singleton repacking. See [packing algorithm](lora.md#optional-token-budget-training-batches) and [memory tuning](lora.md#memory-tuning).
 
 ## GPU configuration
 
-Validation, full-data builds, and standalone warmup use `gpu.device`. The selected
-GPU must support the configured precision; there is no automatic precision change
-or CPU/disk offload. Hardware checks still run on complete warmup-cache hits. Standalone warmup still initializes
-backbone weights on a hit, but compatible feature hits skip backbone forward
-calls while the head recomputes current train/validation losses.
-`ALL` executes SR2 on the configured device layout.
-
-Device placement can change without invalidating caches or checkpoints.
-SR2 checkpoints allow precision, attention, and TF32 changes; compatibility does
-not guarantee identical predictions. See
-[precision and attention behavior](lora.md#hardware-and-input-limits).
+All runs use `gpu.device` with no automatic precision fallback or CPU/disk offload. Hardware checks still run on warmup-cache hits; standalone warmup initializes backbone weights on a hit but skips forward calls when features are cached. Changing `gpu.device`, `precision`, `attention_implementation`, or `allow_tf32` does not invalidate caches or SR2 checkpoints (though numerical predictions may differ).
 
 ## Batch experiments
 
-Use [batch validation](commands.md#batch-validation) for the script's selection,
-ordering, failure handling, and log locations. Each run saves the effective
-configuration beside its metrics; see [configuration snapshots](reports.md#configuration-snapshots).
+See [batch validation](commands.md#batch-validation-and-builds) and [configuration snapshots](reports.md#configuration-snapshots).

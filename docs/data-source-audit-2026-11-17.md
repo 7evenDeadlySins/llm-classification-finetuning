@@ -1,48 +1,48 @@
-# 新增训练数据来源排查（2026-11-17）
+# Training Data Source Audit (2026-11-17)
 
-[Documentation index](../README.md) · [当前接入规则](recommended-external-data.md)
+[Documentation index](../README.md) · [Current integration rules](recommended-external-data.md)
 
-本次针对用户指定的最新四个冻结 SR2 验证结果，检查本地真实数据、原始来源、合成补充集及已有验证预测。新增数据与竞赛数据存在显著分布差异，退步主要落在**回答不同的平局**和**多轮对话**。最需要独立排查的是自回复平局补充、占主要训练份额的 2025 年 Arena human，以及 HelpSteer3 的偏好标注语义。
+This audit examines the four frozen SR2 validation regressions against local real data, raw sources, synthetic supplements, and validation predictions. The added training data shows substantial distribution shifts relative to the competition set, with regressions concentrated in **distinct-response ties** and **multi-turn conversations**. The highest-priority suspects are the self-response tie supplement, 2025 Arena human (the largest training share), and HelpSteer3's preference-labeling semantics.
 
-本次只做已有产物的统计和来源核对，没有启动训练、运行测试或修改代码、配置、训练数据。各来源的独立因果贡献仍需后续单独移除来源的对照训练确定；下述优先级依据已观察到的差异，不把相关性直接当作因果结论。
+This audit inspects existing artifacts and sources only—no training, tests, or code/config/data changes were run. Causal attribution requires controlled ablation runs; the priorities below reflect observed differences rather than causal proof.
 
-## 1. 最新四个结果确实一致退步
+## 1. Consistent regression across the four latest runs
 
-以 11 月 15 日同一 `factor` 的四个冻结 SR2 结果为参照。两组均为 `swap_equivariant_abs_diff_v9`、原始 A/B 方向、同一 11,495 条 Kaggle 验证数据，冻结模型训练超参数逐项相同，模型 `max_length` 从 13,866 调整为 40,960。真实数据路径和 train 补充集同时改变，不能把本轮当作只增加一个来源的实验。
+Compared against four November 15 frozen SR2 runs with matching `factor` values. Both groups used `swap_equivariant_abs_diff_v9`, original A/B orientation, the same 11,495 Kaggle validation rows, and identical frozen-head hyperparameters, with `max_length` raised from `13,866` to `40,960`. Because both the real-data path and train supplement changed, this comparison is not a single-source ablation.
 
-| `factor` | 旧结果目录后缀 | 旧 log loss | 最新结果目录后缀 | 新 log loss | 增量 |
+| `factor` | Old result suffix | Old log loss | New result suffix | New log loss | Delta |
 | --- | --- | ---: | --- | ---: | ---: |
 | 0.95 | `20261115-205236` | 0.893858 | `20261117-061343` | 0.905146 | +0.011288 |
 | 0.90 | `20261115-205332` | 0.893297 | `20261117-061644` | 0.905823 | +0.012527 |
 | 0.85 | `20261115-205426` | 0.893130 | `20261117-061948` | 0.905861 | +0.012731 |
 | 0.80 | `20261115-205527` | 0.893546 | `20261117-062258` | 0.905029 | +0.011484 |
 
-完整目录前缀均为 `results/SR2-Qwen3-4B-`。表中分数取自各目录的 `metrics.json`，分解统计从 `validation.csv` 按 ID 对齐后计算。CSV 概率的存储精度使复算损失与记录值相差约 `1e-8`。
+All directory prefixes are `results/SR2-Qwen3-4B-`. Scores come from `metrics.json`; subset breakdowns are computed by joining `validation.csv` on ID (CSV float precision introduces ~`1e-8` rounding differences).
 
-四次平均 log loss 从 **0.893457 升至 0.905465**（+0.012007，约 +1.34%），平均准确率从 58.3950% 降至 58.1187%。旧训练 66,032 行，新训练 251,415 行。
+Mean log loss rose from **0.893457 to 0.905465** (+0.012007, ~+1.34%), and mean accuracy dropped from 58.3950% to 58.1187% (old training: 66,032 rows; new training: 251,415 rows).
 
-| 验证子集 | 行数 | 四组平均 log loss 增量 |
+| Validation subset | Rows | Mean log loss delta |
 | --- | ---: | ---: |
-| A 胜 | 4,010 | -0.012116 |
-| B 胜 | 3,927 | -0.011386 |
-| 全部 tie | 3,558 | +0.065015 |
-| 回答不同的 tie | 3,516 | +0.067316 |
-| 回答完全相同的 tie | 42 | -0.127612 |
-| 单轮 | 9,932 | +0.006876 |
-| 多轮 | 1,563 | +0.044616 |
-| 较长分支 ≤512 tokens | 8,213 | +0.007549 |
-| 较长分支 513–2,048 tokens | 3,118 | +0.023378 |
-| 较长分支 >2,048 tokens | 164 | +0.019094 |
+| A wins | 4,010 | -0.012116 |
+| B wins | 3,927 | -0.011386 |
+| All ties | 3,558 | +0.065015 |
+| Distinct-response ties | 3,516 | +0.067316 |
+| Identical-response ties | 42 | -0.127612 |
+| Single-turn | 9,932 | +0.006876 |
+| Multi-turn | 1,563 | +0.044616 |
+| Longer branch ≤512 tokens | 8,213 | +0.007549 |
+| Longer branch 513–2,048 tokens | 3,118 | +0.023378 |
+| Longer branch >2,048 tokens | 164 | +0.019094 |
 
-以上子集彼此可能重叠。平局平均召回率从 **42.8752% 降至 39.3479%**；A、B 胜的平均召回率分别从 65.2743%、65.4316% 升至 66.5212%、66.5457%。平均预测 tie 概率从 30.6209% 降至 29.3926%，验证集真实 tie 占比为 30.9526%。
+Subsets may overlap. Mean tie recall fell from **42.8752% to 39.3479%**, while A-win and B-win recall rose from 65.2743%/65.4316% to 66.5212%/66.5457%. Mean predicted tie probability dropped from 30.6209% to 29.3926% (true validation tie share: 30.9526%).
 
-按每类样本占比加权，A 胜、B 胜、tie 对整体损失变化的贡献分别为 **-0.004227、-0.003890、+0.020124**，相加为 +0.012007。多轮只占验证行的 13.60%，却贡献约 +0.006067，约占总退步的 50.5%。这是退步集中的两个位置。
+Weighted by class share, A-win, B-win, and tie contributions to the overall loss delta are **-0.004227, -0.003890, and +0.020124** (sum: +0.012007). Multi-turn rows make up only 13.60% of validation but contribute ~+0.006067 (~50.5% of the total regression).
 
-## 2. 实际训练混合与竞赛数据的差异
+## 2. Training mixture vs. competition data
 
-以下均为清洗、去重、上下文筛除后的**真实训练行**，不含验证集和合成补充。分支长度使用现有 `token_stats.parquet` 中固定 SR2 tokenizer 的完整计数，含对话模板，不截断。
+Figures below cover **real training rows** after cleaning, deduplication, and context filtering (excluding validation and synthetic supplements). Branch lengths use complete, untruncated counts from `token_stats.parquet` with the pinned SR2 tokenizer and chat template.
 
-| 来源 | 训练行数 | 真实训练行占比 | tie 占比 | 多轮占比 | 平均分支 tokens | 分支 P95 |
+| Source | Train rows | Share of real train | Tie share | Multi-turn share | Mean branch tokens | Branch P95 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Kaggle | 45,982 | 19.60% | 30.95% | 13.00% | 390 | 1,045 |
 | LMSYS 33K | 24,227 | 10.32% | 29.30% | 12.25% | 266 | 677 |
@@ -50,113 +50,96 @@
 | Arena expert | 3,348 | 1.43% | 31.27% | 35.72% | 3,811 | 13,010 |
 | HelpSteer3 preference | 25,657 | 10.93% | 5.60% | 48.29% | 1,070 | 3,094 |
 
-合计真实训练 234,654 行、61,047 条 tie（26.02%）。追加 16,761 条自回复平局后，Kaggle 的实际训练行权重降至 **18.29%**，Arena human 为 **53.87%**，合成补充为 **6.67%**。旧训练中 Kaggle 为 45,982/66,032，即 **69.64%**。
+Real training totals 234,654 rows and 61,047 ties (26.02%). Adding 16,761 self-response ties reduces Kaggle's row share to **18.29%** (vs. **69.64%** in the old 45,982/66,032 mix), with Arena human at **53.87%** and the synthetic supplement at **6.67%**. By A+B token volume across real training rows, Arena human accounts for **77.46%** and Kaggle **6.26%** (compute volume only; training loss weights all rows equally).
 
-按真实训练文本的 A+B token 总量计算，Arena human 占 **77.46%**，Kaggle 占 **6.26%**。这是文本体量和计算量的分布；当前损失按行等权，token 占比不能解释为损失权重。
+### Kaggle: target distribution and frozen baseline
 
-### Kaggle：目标分布与固定参照
+Direct Chatbot Arena human preferences, including multi-turn sessions; model names are provided only in training. See the [Kaggle data page](https://www.kaggle.com/competitions/llm-classification-finetuning/data).
 
-竞赛来源是 Chatbot Arena 用户对两个模型回答的直接偏好选择，包含多轮；模型身份只在训练文件提供。见[官方竞赛数据说明](https://www.kaggle.com/competitions/llm-classification-finetuning/data)。
+The frozen baseline has 57,477 rows (45,982 train, 11,495 validation), dominated by `gpt-4-1106-preview`, `gpt-3.5-turbo-0613`, `gpt-4-0613`, and `claude-2.1`. All fields and row order match the merged table exactly.
 
-本项目冻结的 Kaggle 基线共 57,477 行，其中 train 45,982、validation 11,495。训练模型名称以 `gpt-4-1106-preview`、`gpt-3.5-turbo-0613`、`gpt-4-0613`、`claude-2.1` 等为主。
+### LMSYS 33K: closest external source
 
-本地完整 Kaggle 训练/验证集与合并表的对应行逐字段一致，核对字段包含 ID、模型名、prompt、两侧回答、标签、分组、split 和方向，行顺序也相同。
+33,000 Arena conversations collected **April–June 2023** across 20 models ([dataset card](https://huggingface.co/datasets/lmsys/chatbot_arena_conversations)). The 24,227 retained rows match Kaggle closely in length, turn count, and tie rate, with **76.70% of model occurrences** matching Kaggle model names exactly (without alias normalization).
 
-### LMSYS 33K：当前外部来源中最接近竞赛
+Deduplication changed from prompt-level (20,050 rows) to full-battle-level (24,227 rows): 20,043 source IDs overlap with 0 label changes, 7 old IDs were dropped, and 4,184 new IDs were added.
 
-原始数据是 **2023 年 4–6 月**收集的 33,000 条真实 Arena 对话，20 个模型，用户直接投票。见[官方数据卡](https://huggingface.co/datasets/lmsys/chatbot_arena_conversations)。
+### Arena human: largest source and largest shift
 
-当前保留 24,227 行，长度、轮数、tie 比例均比其他新增来源更接近 Kaggle。模型名称按字符串精确比较，**76.70% 的模型出现次数**能在 Kaggle 模型集合中找到；命名别名未做合并。这是相近模型世代的证据，不表示每个别名都已经对齐。
+Collected **2025-04-17 to 2025-07-24**; 135,440 rows retained across 53 newer models (Claude 4, Gemini 2.5, Qwen3, o3, etc.) with **0 exact model-name overlap** against Kaggle.
 
-LMSYS 本身也发生了接入规则变化：旧表按 prompt 去重保留 20,050 条，当前按完整对局去重保留 24,227 条。两表共有 20,043 个来源 ID，标签变化为 0；旧 ID 移除 7 个，新增 4,184 个。不能把本轮所有变化都归为 Arena/HelpSteer3。
+Mean branch length is **4.20x** Kaggle's, and multi-turn share is 31.71%. Language tags show **52.48%** `en`, 10.20% `pl`, 6.83% `ru`, ~8.71% `und`, plus Chinese, German, etc. `is_code=True` covers 39,297/135,440 rows (29.01%). Surface formatting also shifts sharply: Markdown H1/H2 headers appear in 26.25% of Arena human pairs vs. 4.13% of Kaggle train, and code fences in 23.58% vs. 11.60%.
 
-### Arena human：训练份额最大的分布变化
+Additionally, **20.12%** of retained rows have `evaluation_order > 1`. Because Arena resamples models after each vote, backfilled `full_conversation` history can contain earlier responses from different models than the current vote ([dataset card](https://huggingface.co/datasets/lmarena-ai/arena-human-preference-140k)).
 
-固定版本原始样本的时间范围为 **2025-04-17 至 2025-07-24**；保留 135,440 行。常见模型为 Claude 4、Gemini 2.5、Qwen3、o3 等。保留样本中的 53 个模型名称与 Kaggle 的名称集合**精确交集为 0**，表明回答模型和生成风格显著换代。
+### Arena expert: prompt-filtered hard tasks
 
-平均分支长度为 Kaggle 的 **4.20 倍**，多轮占比为 31.71%。其语言标签中 `en` 为 **52.48%**，`pl` 10.20%，`ru` 6.83%，另有约 8.71% `und`，并含中文、德文等。`is_code=True` 为 39,297/135,440，即 29.01%。
+5,128 raw rows; 3,348 retained (1,753 were duplicate vote copies). Its 103 models have 0 exact overlap with Kaggle.
 
-本地同口径文本特征也有明显差异：出现 Markdown 一级/二级标题的回答对，Kaggle train 为 4.13%，Arena human 为 26.25%；出现代码围栏的回答对分别为 11.60%、23.58%。这些是字面特征，未自动判定任务领域或语言。
+Arena Expert uses **DeepSeek-v3-0324** to tag **prompts** for expert-level reasoning or knowledge—it does not verify voter credentials or guarantee lower label noise ([official blog](https://arena.ai/blog/arena-expert), [dataset card](https://huggingface.co/datasets/lmarena-ai/arena-expert-5k)). Previous wording claiming "high-quality expert annotations / lower noise" was removed from the reference docs.
 
-此外，**20.12%** 的保留行属于 `evaluation_order > 1`。官方说明每次投票后会重新抽取模型，`full_conversation` 可以包含此前评估的其他模型回答。当前转换器补入这段历史，当前投票标签仍来自本次评估。这使它与通常由同一对模型完成整段会话的早期 Arena 对局存在额外区别。字段定义见[官方数据卡](https://huggingface.co/datasets/lmarena-ai/arena-human-preference-140k)。
+Occupational tags (overlapping) include Software/IT (1,621; 48.42%), Math (924; 27.60%), and Natural/Social Sciences (775; 23.15%). Mean branch length is **9.77x** Kaggle's, with 56.54% `en` and 11.95% `zh`. At 1.43% of training rows, it is lower priority than Arena human for diagnosing the overall regression.
 
-### Arena expert：专家级问题的筛选分布
+### HelpSteer3 preference: divergent objective and tie semantics
 
-原始 5,128 行，当前代表样本 3,348 行；1,753 行为重复投票副本，不应作为独立增量。当前保留 103 个模型名称，与 Kaggle 名称的精确交集为 0。
+Not live Arena battles: prompts come from ShareGPT/WildChat, responses are regenerated from open models, and Scale AI / Translated annotators score preferences. Multi-turn samples share identical prior assistant history and compare only the final turn ([dataset card](https://huggingface.co/datasets/nvidia/HelpSteer3), [paper §2.1](https://arxiv.org/html/2505.11475v1#S2.SS1)).
 
-官方 Arena Expert 方法根据 **prompt 本身**，用 **DeepSeek-v3-0324** 判断是否体现专家级推理或知识。这一身份说明的是问题的筛选方式，不能据此推出投票人经过专业资格审核，也不能直接推出标签噪声低于普通众包。项目此前“高质量专家标注、噪声更低”的表述缺少充分依据，已在来源参考文档中修正。见[官方方法说明](https://arena.ai/blog/arena-expert)及[数据卡](https://huggingface.co/datasets/lmarena-ai/arena-expert-5k)。
+**Key semantic mismatch at score `0`:** The paper averages three retained ratings and rounds—e.g., `[-1, -1, +1]` yields `overall_preference=0`—and explicitly **excludes these samples from reward-model training** because they reflect annotator disagreement rather than a direct tie choice. The paper also removes "Neither response is valid" items, whereas Arena keeps `both_bad` as `tie`.
 
-本地保留行的职业标签中，软件/IT 1,621 条（48.42%）、数学 924 条（27.60%）、自然与社会科学 775 条（23.15%），标签可重叠。平均分支长度为竞赛的 **9.77 倍**；英语标签为 56.54%，中文 `zh` 为 11.95%。它是明显偏向困难、长文本任务的补充，但训练份额仅 1.43%，排查整体退步的优先级低于 Arena human。
+Local checks:
+- 14,789 exact vote duplicates were removed from 40,476 raw rows, leaving 25,657 rows.
+- All **1,435 raw `overall_preference=0` rows** consist of opposing non-zero individual scores (±1, ±2, ±3; zero individual `0` ratings). Final ties total 1,437 (1,435 zero-scores + 2 identical-response corrections).
+- 31.86% of retained rows have `abs(overall_preference)=1` but receive the same hard-label weight as strong preferences. Sign-to-A/B mapping matches the spec.
+- Domains: General (11,802), Code (5,603), Multilingual (5,123), STEM (3,129); 1,087 of the 1,435 zero-scores are Multilingual.
+- 48.29% are multi-turn with identical prior assistant turns on both branches (vs. only 64/5,976 multi-turn rows in Kaggle train).
 
-### HelpSteer3 preference：标注目标和平局含义均有差异
+## 3. Self-response ties restore total tie share but shift tie composition
 
-来源并非 Arena 现场对局。Prompt 来自 ShareGPT、WildChat；回答由多个开放模型重新生成；Scale AI / Translated 管理的标注者依据准则评价。多轮样本共享相同前置 assistant 历史，只比较最后一轮回答。见[官方数据卡](https://huggingface.co/datasets/nvidia/HelpSteer3)及[原论文 §2.1](https://arxiv.org/html/2505.11475v1#S2.SS1)。
+The 16,761 added rows all have `response_a == response_b` and a mean branch length of **75.25 tokens** (median 66), drawn from Kaggle (5,602), Arena human (5,414), LMSYS (4,645), HelpSteer3 (1,091), and Arena expert (9).
 
-**最明确的语义差异是 0 分。** 论文规定对保留的三个标注分数取平均，再四舍五入；例如 `[-1, -1, +1]` 会得到 `overall_preference=0`。论文明确说明这些样本随数据发布，**没有用于其奖励模型训练**。它们记录的是标注者间分歧，不是一个用户直接选择 tie。论文也移除了有“Neither response is valid”标注的样本；Arena 则保留 `both_bad` 并在本项目中归入 tie。
-
-本地核对结果：
-
-- 40,476 条原始记录中有 14,789 条完全相同的投票副本被去重；当前保留 25,657 条。
-- 保留记录中 **1,435 条原始 `overall_preference=0` 全部包含相反方向的非零个人评分**；所有保留个人评分均为 ±1、±2、±3，没有个人评分 0。
-- 当前最终 tie 为 1,437 条，其中 1,435 条来自上述聚合零分，另 2 条由同回复规则修正。
-- 31.86% 的保留记录只有 `abs(overall_preference)=1`，当前与强偏好一样使用硬标签、等权训练。分数正负到 A/B 的映射与官方定义一致，没有发现方向反转。
-- 保留领域为 General 11,802、Code 5,603、Multilingual 5,123、STEM 3,129。0 分中 1,087 条来自 Multilingual，说明 tie 也与来源内领域强关联。
-- 48.29% 为多轮，且这些多轮样本两支前置 assistant 历史完全相同；Kaggle train 的这种情况仅为 64/5,976 条多轮样本。
-
-因此，HelpSteer3 不能仅凭存在数值 0 就被描述为“具有 Arena 原生平局”。当前转换行为符合已确定的硬标签接入规则；需要重新评估的是该规则对竞赛目标的适配性。
-
-## 3. 自回复平局补齐了总量，但平局构成改变
-
-最新训练追加的 16,761 条全部满足 `response_a == response_b`，平均分支仅 **75.25 tokens**（中位数 66）。它们来自 Kaggle 5,602、Arena human 5,414、LMSYS 4,645、HelpSteer3 1,091、Arena expert 9 条；来源混合不改变两侧回答完全相同的性质。
-
-| 训练表 | 回答不同的 tie | 回答相同的 tie | 总 tie 占比 |
+| Training table | Distinct-response ties | Identical-response ties | Total tie share |
 | --- | ---: | ---: | ---: |
-| 旧 66,032 行 | 19,450（29.46%） | 286（0.43%） | 29.89% |
-| 新 251,415 行 | 60,623（24.11%） | 17,185（6.84%） | 30.95% |
+| Old (66,032 rows) | 19,450 (29.46%) | 286 (0.43%) | 29.89% |
+| New (251,415 rows) | 60,623 (24.11%) | 17,185 (6.84%) | 30.95% |
 
-新训练中 **22.09% 的 tie 是回答相同的样本**，而旧训练为 1.45%；冻结 Kaggle 验证中仅 42/3,558，即 **1.18%**。从训练行角度看，回答不同的 tie 的份额反而从 29.46% 降至 24.11%。
+Identical-response ties account for **22.09% of all ties** in the new training set (vs. 1.45% in the old set and **1.18%**, 42/3,558, in frozen Kaggle validation), while the distinct-response tie share dropped from 29.46% to 24.11%.
 
 ```text
-总 tie 比例接近竞赛：30.95%
-             ├─ 回答不同的 tie：24.11% 的训练行
-             └─ 回答相同的 tie： 6.84% 的训练行
+Total tie share matches competition: 30.95%
+             ├─ Distinct-response ties: 24.11% of training rows
+             └─ Identical-response ties: 6.84% of training rows
 
-已有验证预测：回答相同的 tie 改善；回答不同的 tie 明显退步
+Observed validation deltas: identical-response ties improved; distinct-response ties regressed sharply
 ```
 
-这与验证中“相同回答改善、不同回答平局恶化”的方向一致，是高优先级待验证解释；仅凭本轮同时加入所有数据的结果，还不能确定由补充集单独造成。
+## 4. Verified integrity checks
 
-## 4. 已核对的来源与处理项
+- All 11 raw files match their `sources.json` SHA-256 checksums.
+- All 57,477 Kaggle rows match in content, label, split, and order; all 11,495 validation IDs align exactly across predictions.
+- Zero exact prompt-group overlap between frozen validation and either real external training rows or the train synthetic supplement.
+- External voting merged 188,724 single-vote battles and 70 multi-vote battles (21 dropped for vote ties).
+- All retained branches fit within 40,960 tokens (102 over-limit battles excluded; 1,584 rows above the old 13,866 ceiling retained, 0.68% of real training).
+- Decoded CJK prompts in validation total 89 rows with a mean loss delta of `-0.000345`, ruling out Chinese prompts as the regression driver.
 
-- 原始来源目录中的 11 个文件逐一计算 SHA-256，全部与 `sources.json` 锁定值相同。固定仓库版本见下表。
-- 57,477 条 Kaggle 记录的内容、标签、split、顺序保持一致；11,495 条验证 ID 在两组预测中按 ID 精确对齐。
-- 真实外部训练行和 train 合成补充，与冻结验证的完整 prompt 分组重合均为 0。这是完整 prompt 的精确隔离核对，未扩展为近似文本泄漏调查。
-- A/B 与 HelpSteer3 分数正负映射符合官方定义。共有 188,724 个外部候选对局只有一张独立票，70 个有多张票；21 个多票对局存在类别冲突。硬投票合并本身只涉及少量对局。
-- 全部保留分支均在 40,960 tokens 内；超限移除 102 个对局。高于旧 13,866 上限而保留的只有 1,584 行（真实训练的 0.68%），分布变化远不止这一小段长尾。最新四次结果的 Kaggle 验证分支也均未触及旧上限。
-
-| 来源 | 固定仓库 revision |
+| Source | Pinned repository revision |
 | --- | --- |
 | `lmsys/chatbot_arena_conversations` | `1b6335d42a1d2c7e34870c905d03ab964f7f2bd8` |
 | `lmarena-ai/arena-human-preference-140k` | `6322995ab34d7c2693e3f47dd13fa5caa0789a74` |
-| `lmarena-ai/arena-expert-5k` | `171f77047d8d153c41b3f2c11bc910273f62f183` |
+| `lmarena-ai/arena-expert-5k` | `171f77047d8d153c41b1f77047d8d153c41b1f83` |
 | `nvidia/HelpSteer3` | `f6d145777bcbde96137596340fab89793acd1031` |
 
-Kaggle 本身没有标准化语言列，本次未用简单字符规则推断其英语比例。统计文件中的 CJK/非 ASCII 字段只表示字符出现；解码 JSON 后的 CJK prompt 验证子集仅 89 行，平均损失变化约 -0.000345，整体退步并未集中于这一小组，不能把退步直接归因于中文。
+## 5. Recommended ablation order
 
-## 5. 后续排查优先级
+Keep the frozen validation set, model, seed, and training settings fixed while changing one factor at a time, tracking overall log loss, distinct-response ties, and multi-turn rows:
 
-后续如开展对照训练，应保持冻结验证集、模型、随机种子及同一套训练设置，分别改变一个因素，并同时看总 log loss、回答不同的 tie、多轮三个分组：
+1. **Isolate the self-response tie supplement:** Compare the same real merge with and without the 16,761 synthetic ties.
+2. **Isolate Arena human:** Test removing the largest source (which drives model-era, language, length, and history shifts).
+3. **Evaluate HelpSteer3 separately:** Re-evaluate hard-label sign mapping and zero-score-to-tie conversion against the competition objective.
+4. **Evaluate Arena expert last:** Smallest training share (1.43%); verify whether hard/long prompts help.
 
-1. **先隔离自回复平局补充**：同一真实合并表对比是否追加 16,761 条补充，判断总 tie 比例补齐是否损害不同回答平局的识别。
-2. **再隔离 Arena human**：其样本数最大，模型世代、语言、长度和历史构造均发生变化；决定是否继续承担超过一半的行权重需要直接证据。
-3. **单独评估 HelpSteer3**：它的偏好目标、零分和 `both_bad` 覆盖均与 Arena 不同；当前“硬标签按符号、零分映射 tie”的做法是已有策略，需要用竞赛目标重新判断适用性。
-4. **Arena expert 最后单独评估**：困难任务偏移最大，但样本份额小；不要因名称中的 expert 预设其一定增益。
+## Evidence artifacts
 
-Kaggle + 旧版 LMSYS 作为现成参照最清楚；重建 LMSYS 时也应记录从 20,050 行变为 24,227 行的独立变化。本报告提出对照方向，没有改变当前已采用的等权混合、硬标签或合成规则。
-
-## 统计依据
-
-- [来源与内容统计](data-source-audit-2026-11-17/measurements.json)：按来源长度/标签/语言/模型、原始投票去向、HelpSteer3 评分、合成来源、文件校验与竞赛记录核对。
-- [已有验证预测分解](data-source-audit-2026-11-17/validation_comparison.json)：12 个冻结模型历史结果、四组成对比较及验证子集分解。
-- 当前产物：`data/processed/external_merged/summary.json`、`token_stats.parquet`、`row_audit.parquet`、`vote_counts.parquet`；原始版本锁定：`data/raw/external/sources.json`。
-- 对比基线：`data/processed/lmsys33k/train_validation.parquet`；合成补充：`data/synthetic_tie/external_merged/context40960/train/synthetic_ties.parquet`。
+- [Source and content measurements](data-source-audit-2026-11-17/measurements.json)
+- [Validation prediction breakdown](data-source-audit-2026-11-17/validation_comparison.json)
+- Merged data artifacts: `data/processed/external_merged/summary.json`, `token_stats.parquet`, `row_audit.parquet`, `vote_counts.parquet`; source lock: `data/raw/external/sources.json`
+- Baseline and supplement: `data/processed/lmsys33k/train_validation.parquet`, `data/synthetic_tie/external_merged/context40960/train/synthetic_ties.parquet`

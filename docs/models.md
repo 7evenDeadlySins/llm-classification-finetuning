@@ -2,31 +2,18 @@
 
 [Documentation index](../README.md)
 
-Use the [saved processed split or prepare data](getting-started.md#choose-the-data-source),
-then choose a [configured model profile](../README.md#model-profiles).
-Both SR2 profiles use the saved holdout; validation/build uses
-[one GPU](configuration.md#gpu-configuration).
+Use the [saved split or prepare data](getting-started.md#choose-the-data-source), then run a [configured profile](../README.md#model-profiles) on [one CUDA GPU](configuration.md#gpu-configuration).
 
 ## Validate or build
 
-| Mode | Training data | Main output | Does it save a production checkpoint? |
+| Mode | Training data | Main output | Production checkpoint? |
 | --- | --- | --- | --- |
-| `model MODEL` | Selected original train rows with evaluation on the saved validation partition after each epoch | Best-epoch predictions for frozen SR2, final-epoch predictions for LoRA; `validation.csv`, `metrics.json`, `config.yaml` | No |
-| `model SR2-Qwen3-4B --build` | Selected original rows across both partitions | `head[_TAG].pt` | Yes |
-| `model SR2-Qwen3-4B-lora --build` | Selected original rows across both partitions | `adapter[_TAG].pt` and `merged[_TAG]/` | Yes |
-| `model warmup --build` | Selected original train rows with evaluation on train and saved validation rows | Completed SR2 warmup cache and both losses | No |
+| `model MODEL` | Selected original train rows (eval on frozen validation after each epoch) | `validation.csv`, `metrics.json`, `config.yaml` (frozen SR2: `best_epoch`; LoRA: final epoch) | No |
+| `model SR2-Qwen3-4B --build` | Selected original rows across both partitions | `models/SR2_Qwen3_4B/head[_TAG].pt` | Yes |
+| `model SR2-Qwen3-4B-lora --build` | Selected original rows across both partitions | `models/SR2_Qwen3_4B_lora/adapter[_TAG].pt` + `merged[_TAG]/` | Yes |
+| `model warmup --build` | Selected original train rows (eval on train and validation) | Completed SR2 warmup cache and both losses | No |
 
-Full-data model builds have no validation set. Standalone warmup evaluates the
-saved validation partition, including after restoring a cache hit.
-Frozen SR2 validation uses early stopping and publishes best-epoch predictions;
-LoRA validation publishes final-epoch predictions. Warmup caches and production
-checkpoints serve different purposes. See [LoRA stages](lora.md#optimization-and-head-warmup).
-
-The terminal summary reports the published validation log loss and prediction
-count together. `Best validation epoch` identifies the first epoch with the
-lowest unrounded validation log loss, including any executed LoRA warmup epochs.
-LoRA publishes final-epoch predictions and loss. Validation snapshots record the
-fixed coefficient `t`, and full-data checkpoints store it in the head.
+`Best validation epoch` reports the first epoch with the lowest unrounded validation log loss (including executed LoRA warmup epochs). Validation snapshots record `t`; builds store `t` in the head.
 
 ## Frozen Skywork reward backbone
 
@@ -35,61 +22,12 @@ uv run model SR2-Qwen3-4B
 uv run model SR2-Qwen3-4B --build --checkpoint-tag experiment
 ```
 
-`SR2-Qwen3-4B` freezes the same Skywork backbone and trains the same current
-SR2 swap-equivariant head without creating adapters. Its independent
-`SR2_Qwen3_4B` section uses `early_stopping` (default `7`) for validation and
-`build_epochs` for builds, with ordinary `training_batch_size` and `learning_rate`
-fields, validation-only `factor` (default `0.95`) and `patience` (default `2`),
-and build-only `build_min_lr` (default `learning_rate / 5`). It does not require
-`warmup` or LoRA sections. The optimizer, clipping, precision, full-input
-serialization, and pooling follow head
-warmup. Training and inference use original rows only;
-the backbone stays in evaluation mode during feature extraction/head training.
+`SR2-Qwen3-4B` freezes the Skywork backbone and trains the SR2 swap-equivariant head without adapters (`SR2_Qwen3_4B` section; independent of `warmup` and `SR2_Qwen3_4B_lora`). It uses original rows only and shares token/feature/build-head caches with warmup.
 
-Validation starts a fresh head on the saved train partition. After each
-validation evaluation, ReduceLROnPlateau consumes the unrounded, unsmoothed
-validation log loss once, using configured `factor` and the current `patience`
-with fixed `threshold=0` and `min_lr=0`. The first epoch uses the initial
-learning rate; reductions apply to the next epoch. The run then compares that
-same unrounded loss against the best validation loss so far. A strictly lower
-loss updates the best loss and predictions, resets the early-stopping counter to
-zero, and does not restore `patience`. Ties and higher losses increment the
-early-stopping counter; rate reductions alone do not reset it. When the
-early-stopping counter reaches `early_stopping` and current `patience > 0`,
-validation decrements `patience` by `1` in place, resets the early-stopping
-counter to zero, and continues with the existing model, optimizer, current
-learning rate, and remaining scheduler state. When the counter reaches
-`early_stopping` with `patience = 0`, training stops. For example, `patience: 2`
-and `early_stopping: 7` progress through `2 -> 1 -> 0`, stopping 21 epochs after
-the best epoch if no further improvement occurs. `build_epochs` may be omitted
-and never caps validation. See
-[configuration](configuration.md#model-fields) for scheduler parameters.
-The run publishes the best epoch's holdout predictions
-and loss, all executed epoch metrics, `best_epoch`, and the independent
-configuration snapshot. Each executed epoch evaluates the whole training set
-with final weights, dropout disabled,
-and configured label smoothing; validation log loss remains unsmoothed.
-Compatible tokens and frozen features are
-[shared with warmup](caching.md#frozen-sr2-head-training). Validation does not
-read or write completed head/optimizer/RNG states, so every run executes training
-from epoch `1`, including when an old fixed-epoch head entry exists.
+- **Validation:** Ignores `build_epochs`, starts a fresh head at epoch 1 (never reads/writes completed head caches), and runs `ReduceLROnPlateau` (`factor` default `0.95`, `patience` default `2`, `threshold=0`, `min_lr=0`) with staged `early_stopping` (default `7`). Reaches `patience = 0` and stops after `early_stopping` non-improving epochs, publishing `best_epoch` predictions, all epoch metrics, and the config snapshot. See [scheduler rules](configuration.md#learning-rate-schedules).
+- **Build (`--build`):** Requires positive `build_epochs`, trains on both partitions with exponential decay from `learning_rate` to `build_min_lr` (default `learning_rate / 5`), and reuses compatible head caches (exact hits skip training; lower-epoch hits resume only when `build_min_lr = learning_rate`). Prepares CPU inputs and checks destination writability before CUDA setup, then atomically writes `head[_TAG].pt` after CPU readback validation (omitting base weights and optimizer state).
 
-Build uses every original ID from both partitions, without holdout evaluation.
-It requires positive `build_epochs`, uses the warmup-compatible epoch-based
-exponential curve from `learning_rate` to `build_min_lr`, and retains completed
-head-state cache reuse: exact hits skip training; lower-epoch hits continue only
-when `build_min_lr = learning_rate`;
-decay-enabled misses train the full configured epoch count.
-It prepares CPU inputs and checks the destination before configuring CUDA.
-It writes `models/SR2_Qwen3_4B/head[_TAG].pt`, containing FP32 head parameters,
-the head architecture, immutable backbone/tokenizer/serializer identities,
-training-source fingerprint, and effective settings. A staged file is reloaded
-on CPU and its metadata, exact tensor names/shapes, dtype, and finite values
-are checked before atomic replacement. It omits base weights and optimizer
-state; the frozen backbone needs no merged export. Build reports only executed
-epochs, including zero for an exact full-data head-cache hit.
-
-`ALL` runs configured frozen SR2 before LoRA for validation/build.
+`ALL` runs configured frozen SR2 before LoRA for validation or build.
 
 ## Skywork reward backbone with LoRA
 
@@ -97,77 +35,22 @@ epochs, including zero for an exact full-data head-cache hit.
 uv run model SR2-Qwen3-4B-lora
 ```
 
-SR2 loads `Skywork/Skywork-Reward-V2-Qwen3-4B` through `AutoModel`, discards its
-scalar reward head, and trains LoRA plus a
-[swap-equivariant three-class head](lora.md#swap-equivariant-head). It uses the
-aligned [SR2 chat-template serializer](data-preparation.md#conversation-serialization)
-and last-real-token pooling without regenerating the split. Training uses original rows and produces
-one prediction per ID; `A/B_swap` is rejected. Its model, checkpoint,
-warmup-cache, and result namespace is SR2. See [LoRA training](lora.md).
+Loads `Skywork/Skywork-Reward-V2-Qwen3-4B` via `AutoModel` (dropping its scalar reward head) and trains LoRA adapters + the [swap-equivariant head](lora.md#swap-equivariant-head) on original rows using `sr2-qwen3-chat-template-v1` and last-real-token pooling. See [LoRA training](lora.md).
 
 ## Full-data builds
 
-Build a tagged adapter/head checkpoint and merged backbone:
-
-```shell
-uv run model SR2-Qwen3-4B-lora --build --checkpoint-tag experiment
-```
-
-Both active model builds append `data.build_supplement_path` when configured.
-Current presets temporarily set both `data.train_supplement_path` and
-`data.build_supplement_path` to `null` (disabling both
-[tie duplication](data-preparation.md#tie-duplication) and
-[synthetic tie supplements](data-preparation.md#scope-specific-synthetic-ties)).
-A build trains on all 57,477 Kaggle rows and targets the same token volume
-from ranked external rows. The current ranking yields 8,934 external rows,
-including 2,765 ties.
-See [ranked external selection](data-preparation.md#ranked-external-training-selection).
-Build directly from the prepared dataset:
-
 ```shell
 uv run model SR2-Qwen3-4B --config config.yaml --build
-uv run model SR2-Qwen3-4B-lora --config config.yaml --build
+uv run model SR2-Qwen3-4B-lora --config config.yaml --build --checkpoint-tag experiment
 ```
 
-Build prepares the saved data, full conversation tokens, and full-data batch
-plan on CPU, then probes both output destinations before configuring CUDA
-or loading model weights. Every selected original ID contributes
-one training row. There is no holdout evaluation during a build. Compatible token, batch,
-and frozen-feature caches are reused. The full-data head-warmup cache is keyed
-by all actual training IDs, their labels, and supplement content when enabled, so a train-partition-only head cache is not
-a complete hit.
-Exact warmup hits skip that stage. With `warmup.build_min_lr = warmup.learning_rate`, compatible
-lower-epoch hits execute only the remaining warmup epochs before joint training;
-exponential decay requires an exact target-epoch hit or a complete new run.
+Builds train on all 57,477 Kaggle rows plus ranked external rows (8,934 external rows / 2,765 ties under the current ranking) and `data.build_supplement_path` when configured (currently `null` in all presets). There is no holdout evaluation.
 
-The build summary reports actual executed epochs separately for head warmup
-and joint training, followed by the final training loss, checkpoint path, and
-merged backbone directory.
-The total epoch count excludes cached warmup epochs. For example, an exact
-warmup hit with two configured joint epochs reports zero executed warmup epochs
-and two executed joint epochs.
+1. **CPU preparation & preflight:** Prepares data, tokens, and batch plans on CPU and probes both output paths for writability before CUDA/weight loading.
+2. **Warmup cache:** Keyed by all training IDs, labels, and supplement content (a train-partition cache is not a complete hit). Exact hits skip warmup; fixed-rate lower-epoch hits train remaining epochs; exponential decay requires an exact target hit or fresh run.
+3. **Checkpoint & merged export (LoRA):** Atomically saves and CPU-validates `adapter[_TAG].pt`, then merges LoRA weights on CPU (`merge_and_unload(safe_merge=True)`), exports `merged[_TAG]/` (config, 5 GB-sharded Safetensors at build precision, tokenizer, `export_metadata.json`) via staged directory replacement with `.merged[_TAG]-backup` recovery. Export failures preserve the already-saved `adapter[_TAG].pt`. See [export checks](lora.md#merged-backbone-export).
 
-Saving writes a temporary checkpoint and reloads it on CPU to validate
-metadata, finite tensor values, and the head architecture.
-Only a validated temporary file replaces the selected checkpoint. A failed
-write or validation leaves the previous checkpoint intact and cleans up the
-temporary file; this check does not reload base weights or run GPU inference.
-
-After saving the adapter/head checkpoint, build moves the trained backbone to
-CPU, merges its LoRA weights, and exports a full Hugging Face model directory.
-The export contains the model configuration, Safetensors weights split at 5 GB,
-and the training tokenizer. It preserves the build's backbone precision. A
-tagged build writes `models/SR2_Qwen3_4B_lora/merged_TAG/`; an untagged build
-writes `models/SR2_Qwen3_4B_lora/merged/`.
-
-The export is staged and checked locally before replacing an existing directory,
-with backup/restore handling during replacement. If export fails, the command
-reports failure and the saved adapter/head checkpoint remains available; the
-previous export is preserved at its original location or the backup path named
-in the error. Build reports success only after both outputs have been saved.
-See [export checks and metadata](lora.md#merged-backbone-export).
-
-Load an exported backbone independently of the original Hub cache:
+The build summary reports executed warmup and joint epochs separately (excluding cached warmup epochs), final training loss, checkpoint path, and merged directory. Load an exported backbone independently:
 
 ```python
 from transformers import AutoModel, AutoTokenizer
@@ -177,88 +60,17 @@ backbone = AutoModel.from_pretrained(path, dtype="auto", local_files_only=True)
 tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
 ```
 
-This is the `AutoModel` backbone used for training. The trained classification
-head remains in the corresponding adapter/head checkpoint.
-
-The adapter/head checkpoint omits base weights and optimizer state. Preserve the
-merged directory separately when retaining the complete trained backbone.
-[Model downloads](caching.md#hugging-face-model-downloads) contain the original
-base weights.
-
-Without a tag, a build replaces `models/SR2_Qwen3_4B_lora/adapter.pt` and
-`models/SR2_Qwen3_4B_lora/merged/`. Different tags retain separate outputs.
-See [checkpoint flags](commands.md#model-selection-and-execution-modes),
-[batch validation](commands.md#batch-validation), and [reports](reports.md).
-
 ## Checkpoint compatibility
 
-SR2 retains adapter/head schema v2 and uses the
-`swap_equivariant_abs_diff_v10` architecture with fused subtractive L/M win
-projections. The tie reuses their GELU activations and shared dropout mask,
-clamps the masked wins to nonnegative `C_A` and `C_B`, and computes
-`tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff` in FP32 with autocast
-disabled, with `u_eff = 0.01 * softplus(u / 0.01)`. Checkpoints store raw `u`
-(`[1, h]`), `tie_bias`, and the fixed FP32 `t` buffer. Initial effective
-weights are sampled uniformly around `0.2 / (3h)` and encoded with scaled inverse
-softplus. The unconstrained `tie_bias` starts at zero.
-See the [head definition](lora.md#swap-equivariant-head) for the exact bounds.
-Frozen SR2 uses the same head and frozen-head schema v1. Build with the desired
-`t` to produce a v10 checkpoint. Head warmup uses v10-specific cache keys
-under schema v5. See the [v10 migration](migration.md#sr2-v10-fixed-tie-coefficient).
-See [adapter/head checks](lora.md#checkpoints) for the enforced fields and pinned
-Hub revision. Historical Qwen checkpoints are not converted into SR2 checkpoints.
+SR2 uses `swap_equivariant_abs_diff_v10` (`cross_projected_clamped_win_sum_diff`), adapter/head schema v2, frozen-head schema v1, and warmup schema v5 (`scaled_uniform_clamped_gelu_tie_v6`). See [head definition](lora.md#swap-equivariant-head), [v10 migration](migration.md#sr2-v10-fixed-tie-coefficient), and [checkpoint checks](lora.md#checkpoints).
 
 ## Training progress
 
-Progress logs include model/mode/stage/epoch, percentage, work count, and
-`time: elapsed/estimated_total`. Durations use unbounded `HH:MM:SS`; the right-hand
-duration is the current counter's estimated total time, calculated as
-`elapsed * total_work / completed_work`, rather than remaining time.
+Progress logs show `model/mode/stage/epoch`, percentage, work count, and `time: elapsed/estimated_total` (`elapsed * total_work / completed_work` in unbounded `HH:MM:SS`).
 
-Frozen SR2 validation prints one epoch summary every `early_stopping` epochs:
-with `early_stopping: 5`, regular summaries appear at epochs `5`, `10`, `15`,
-and so on. There are no intermediate percentage or timed epoch logs. Training
-and validation still execute and record metrics after every epoch. Each summary
-reports the epoch, training loss, current and best validation loss, `best_epoch`,
-and the consecutive non-improvement count against `early_stopping`. The stopping
-epoch always prints one final summary prefixed with `Early stopping`, even
-between regular log boundaries.
-Stopping on a regular log boundary prints that summary only once.
-
-These validation logs use `HH:MM:SS.mmm` durations. The completion summary gives
-the whole epoch's elapsed `time` plus `optimization_time`,
-`training_evaluation_time`, and `validation_time`, making all three phases visible
-for the reported epoch. Serialized metrics retain their whole-second format,
-combined training-phase meaning, and complete per-epoch history.
-
-[LoRA progress](lora.md#training-progress) has independent Warmup feature
-extraction, Head warmup, and Joint training stages. Work and timing reset between
-stages and accumulate across epochs within a stage. Each optimizer group,
-extraction branch batch, and head inference batch counts as one work unit. Warmup
-stages log approximately every 20%; Joint training logs approximately every 10%
-and includes validation feature extraction. Dynamic training micro-batches do
-not change the finalized update-group count.
-
-Complete inline head-warmup hits log reuse without progress for skipped work. A
-complete standalone head hit reports a separate Cached head evaluation stage,
-executing zero training epochs. Warmup feature extraction runs only for missing
-unique branches; complete feature hits log reuse without an extraction stage.
-Partial head hits in either mode report Head warmup progress only for remaining
-epochs, keeping epoch numbers continuous with the source cache. CPU preparation, cache I/O,
-saving, and publication remain outside the stage boundaries, so stage estimates
-differ from [complete-run timing](reports.md#timing-metrics). Each successfully
-completed stage prints 100% once with its actual duration on both sides;
-frozen SR2 validation instead logs at the epoch cadence described above.
-Failures do not force completion.
-
-The retained frozen-model infrastructure keeps its legacy shared CPU counter and
-5% interval. Existing `TrainingProgress(total_steps=...)` callers retain that
-behavior; LoRA explicitly starts and finishes each independent stage.
+- **Frozen SR2 validation:** Silent per-epoch counter; prints one `HH:MM:SS.mmm` summary every `early_stopping` epochs plus the stopping epoch (`Early stopping`), separating `optimization_time`, `training_evaluation_time`, and `validation_time`.
+- **LoRA / warmup:** Independent stages (**Warmup feature extraction**, **Head warmup** at ~20%, **Joint training** at ~10%; or **Cached head evaluation** on standalone hits). Cache hits skip progress for skipped stages; CPU prep, cache I/O, and publication are outside stage timers. See [LoRA progress](lora.md#training-progress) and [timing metrics](reports.md#timing-metrics).
 
 ## Retired profiles
 
-Frozen Qwen3-4B, EXPT2, older standard LoRA, EXPT, QLoRA, and Qwen3-1.7B
-profiles are not registered.
-For old names, local archives, configuration changes, and artifact compatibility,
-see [migration](migration.md). Source ownership is mapped in
-[structure.md](../structure.md#package-map).
+Frozen Qwen3-4B, EXPT2, older standard LoRA, EXPT, QLoRA, and Qwen3-1.7B are unregistered; see [migration](migration.md) and [structure.md](../structure.md#package-map).

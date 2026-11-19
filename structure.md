@@ -264,190 +264,35 @@ present in a fresh checkout.
 
 ## Invariants to preserve
 
-1. **Split integrity:** all models share one saved grouped holdout. Group exchanges
-   preserve original class/row counts, each ID has one original row, and
-   infeasible preparation leaves the previous dataset intact. External battle
-   deduplication retains distinct response pairs for the same training prompt,
-   including prompts shared with Kaggle training rows, while excluding external
-   rows sharing any frozen validation prompt. Complete prompt and unordered
-   response pair identify a duplicate battle; `group_id` alone does not. See
-   [data preparation](docs/data-preparation.md).
-2. **Input and output order:** validate unique original IDs with `is_swapped=False`
-   before execution. Render alternating user/assistant turns with the tokenizer's official chat template, no system message, and no
-   generation prompt; preserve its default reasoning block and trailing newline.
-   Encode with the same tokenizer and `add_special_tokens=False`. Predictions
-   use the fixed competition column order with finite
-   normalized probabilities. See [inputs](docs/data-preparation.md#conversation-serialization).
-3. **Profile objectives:** SR2 uses fused shared L/M subtractive cross projections for wins,
-   on original rows only. Reuse masked GELU wins, clamp them to nonnegative
-   `C_A` and `C_B`, and compute
-   `z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff` entirely in
-   FP32 with autocast disabled. Here `u_eff = 0.01 * softplus(u / 0.01)` and
-   the fixed coefficient `t` defaults to `√5`. Save raw `u` (`[1, h]`),
-   unconstrained scalar `tie_bias`, and the FP32 `t` buffer.
-   Both wins share one dropout mask, inherited by the tie features without a
-   separate projection or mask. Architecture
-   `swap_equivariant_abs_diff_v10` uses zero-mean uniform weights with
-   standard deviations `1/sqrt(2D)` for L/M weight blocks and `0.1/sqrt(h)` for
-   the win readout, derived from actual layer dimensions. With
-   `mean = 0.2 / (3h)`, sample `U_0 ~ U(0.5 * mean, 1.5 * mean)` and initialize
-   `u = 0.01 * invsoftplus(U_0 / 0.01)`. Both `tie_bias` and B1 start at
-   zero. Use stable inverse softplus `x + log(-expm1(-x))`.
-   The head has `2Dh + 3h + 1` trainable parameters.
-   Batch A/B inputs once, use one packed L/M projection, one shared win readout,
-   and one tie readout, for three linear calls in total.
-   Outputs are FP32 `[r_A, r_B, z_tie]`.
-   The v10 marker identifies the fixed-`t` layout for warmup caches and
-   production checkpoints.
-   The feature combination marker is `cross_projected_clamped_win_sum_diff`.
-   SR2 warmup additionally versions initialization as
-   `scaled_uniform_clamped_gelu_tie_v6`, isolating earlier initialization states
-   without changing storage schemas.
-   Frozen SR2 uses this same head and initialization, freezing the backbone and
-   training only the head without adapters. Validation uses ReduceLROnPlateau;
-   builds use the shared warmup epoch-based exponential-decay algorithm with
-   their independent initial rate, minimum rate, and build epoch count.
-   See [head definition](docs/lora.md#swap-equivariant-head).
-4. **Cache identities:** distinguish tokens, frozen/warmup features, plans,
-   warmup state, and production checkpoints. Map cached entries to current rows/labels; never
-   infer one compatibility from another. Version identities when their actual
-   representation/algorithm changes. See [caching](docs/caching.md).
-5. **CPU preparation:** token/loader/plan preparation must not load model weights
-   or initialize CUDA. Full-data LoRA builds complete data/token/plan preparation
-   and adapter/head plus merged-export write preflights before configuring CUDA
-   or loading weights;
-   staged checkpoints must pass CPU readback validation before replacing
-   the previous production artifact. Complete retained frozen-model embedding hits
-   skip backbone
-   weights while retaining applicable input and hardware checks. Complete inline warmup hits
-   skip warmup work; complete standalone warmup hits evaluate current train/validation
-   data, and frozen-SR2 build hits evaluate all training data without training or
-   rewriting cached state. Frozen SR2 validation always starts a fresh head and
-   reads/writes only tokens and frozen features, never completed head-state caches. Exponential decay
-   reuses only the exact target epoch and includes the
-   `exponential_endpoint_epoch_v2` schedule and `warmup_build_min_lr`, isolating
-   older base-controlled and polynomial/cosine caches. Persistent completed-epoch
-   metadata retains the `warmup_epochs` name; configuration objects use
-   `warmup_build_epochs`.
-   Fixed-rate partial hits select the largest compatible lower epoch, reconstruct
-   shuffle state with index-only
-   replay, restore training RNG after feature preparation, and execute only remaining
-   epochs before publishing a separate target cache. Progress and metrics count only
-   newly executed work; schema v5 and existing fixed-rate cache keys remain unchanged.
-6. **LoRA inputs and attention:** never truncate adapter inputs. Right-pad without
-   masks, pool the last real token, and preserve scoped SDPA/checkpoint
-   recomputation settings. Restore global predicates/flags after failures.
-   See [hardware/input behavior](docs/lora.md#hardware-and-input-limits).
-7. **Optimizer groups:** preserve row-normalized loss, one clipping/update boundary
-   per finalized group, short-tail merging, and the merged joint update last.
-   Epoch length queries must match iteration without changing RNG state.
-   Packing and checkpointing use total independently padded A/B tokens
-   (`rows * (longest_A + longest_B)`). Both passes compare optimal contiguous
-   DP cuts with best-fit, minimizing micro-batch count before total padded
-   tokens and retaining best-fit on exact ties. DP preserves each global sort
-   in the initial pass and descending A+B order in the second; individually
-   oversized rows stay alone outside the eligible sequence. Best-fit placements
-   minimize remaining budget, then creation order.
-   Planning, plan validation, and runtime share this cost definition. Both
-   packing passes stay within finalized update boundaries.
-   Checkpointing is chosen once per A/B joint micro-batch through backward;
-   both branch graphs are retained until one backward pass, and disabling
-   checkpointing removes input-gradient hooks. Joint adapters and the main head
-   group share one base learning rate, holding it fixed for the first
-   `lr_decay_delay_epochs` joint epochs
-   (default `0`) before one cosine curve across the remaining updates. The total
-   epoch count stays unchanged; a delay at least as large as `epochs` keeps the
-   rate fixed throughout, and a single remaining update uses the initial rate.
-   Each consumed optimizer group advances the schedule once, including
-   FP16-skipped updates. All trainable head parameters share one AdamW group.
-   Head warmup and frozen SR2 builds derive exponential decay from
-   `build_epochs` and `build_min_lr`,
-   setting one rate at the start of each epoch. The first epoch uses the initial
-   rate; for multiple epochs, the final epoch uses the minimum exactly. A single
-   epoch uses the initial rate. Minimum rates default to the corresponding head
-   initial rate divided by five and must be finite in `(0, initial_lr]`.
-   Configurations, snapshots, checkpoint training metadata, and decaying cache
-   identities retain the minimum. Equal initial/minimum rates keep head training
-   fixed; joint training uses a minimum ratio of `1` for a fixed rate. Disabled
-   warmup (`build_epochs: 0`) creates no head scheduler. Frozen SR2 validation
-   steps ReduceLROnPlateau once after each complete unsmoothed validation loss,
-   with configurable `factor`/initial `patience`, fixed threshold/minimum rate of
-   zero, and default `eps=1e-8`. Apply the epsilon gate to the head rate.
-   The next epoch retains the resulting rate without an exponential reset;
-   learning-rate reductions do not reset the early-stopping counter, while each
-   completed `early_stopping` non-improving window with `patience > 0` decrements
-   `ReduceLROnPlateau.patience` by `1` in place and resets the early-stopping
-   counter without restoring `patience` on later improvements or resetting other
-   scheduler/optimizer/model state. See
-   [batching](docs/lora.md#optional-token-budget-training-batches).
-8. **Precision:** trainable adapter/head parameters, gradients, and AdamW moments
-   stay FP32. BF16 features, explicit BF16 win computation (with head autocast
-   disabled), and FP32 tie/logit arithmetic retain the documented policy. BF16 LoRA input dtype upcasting is disabled once after adapter
-   initialization for the model instance; forward and checkpoint recomputation
-   do not traverse the model to change that policy. Evaluation disables gradient
-   checkpointing. See [precision](docs/lora.md#hardware-and-input-limits).
-9. **Warmup state:** publish only completed compatible head/optimizer/scaler/RNG
-   states and validate them before restoration. Cache identity includes actual
-   training IDs and their labels, sorted by ID; holdout/standalone warmup exclude
-   validation-only labels, while full-data builds include both partitions and the
-   build supplement (`split="build"`). Holdout/standalone training adds its
-   separate train supplement. Training fingerprints combine real and selected
-   supplement digests; batch plans and head-warmup identities include supplement
-   content in both scopes. Unsupplemented cache identities remain compatible. Each
-   executed warmup epoch evaluates its complete training set with
-   final weights, dropout disabled, and warmup smoothing; validation remains
-   unsmoothed. Publish head state only after these evaluations succeed.
-   Warmup cache metadata includes the top-level configuration value `t`.
-   The cached FP32 buffer must match that value.
-   Warmup caches retain optimizer state for warmup continuation. On entry to the
-   first joint epoch, clear AdamW moments and step counters once, including after
-   complete cache hits and partial-cache continuation. Preserve trained weights,
-   parameter groups, GradScaler, and RNG state; subsequent joint epochs retain
-   their accumulated optimizer state.
-   Adapter-free warmup features persist separately by complete branch token content,
-   immutable backbone identity, compute precision, exact storage dtype, and extraction
-   policy. Frozen SR2 and head-only warmup initialize only the head on complete
-   feature hits; misses lazily load/check the frozen backbone and extract only
-   unique missing branches without advancing the head's CPU/CUDA RNG. Config,
-   tokenizer, local-content identity, hardware, and input validation remain
-   mandatory. LoRA joint models keep eager adapter/backbone initialization.
-   Restore continuation RNG after all feature preparation.
-   No persisted live LoRA features or losses. See [warmup](docs/caching.md#lora-head-warmup).
-10. **Placement and production state:** load backbones directly on the configured
-    GPU with device maps, without replicas or CPU/disk offload. Production builds save adapter/head first, then export the LoRA-merged backbone and
-    tokenizer on CPU at the build precision. Adapter/head files retain their
-    schema and Hub revision; optimizer state is omitted. Merged exports use staged
-    directory publication with backup/restore handling.
-    See [GPU layout](docs/configuration.md#gpu-configuration) and [checkpoints](docs/lora.md#checkpoints).
-11. **Publication:** stage generated artifacts before exposure. `CacheStorage`
-    owns locks/checksums/multipart policy; report promotion restores previous
-    output where recoverable. Preserve explicit failures and backup paths.
-    Real-data and synthetic-tie staging directories inherit project permissions
-    on Windows; do not publish `mkdtemp` directories with private ACLs.
-12. **Metrics and history:** frozen SR2 validation ignores fixed epoch counts,
-    steps `ReduceLROnPlateau.patience` down by `1` and resets the early-stopping
-    counter whenever `early_stopping` consecutive epochs fail to strictly lower
-    the overall best unsmoothed validation loss while `patience > 0` (without
-    restoring `patience` on later improvements or resetting model, optimizer,
-    current rate, or other scheduler state), runs a full `early_stopping` window
-    at `patience = 0` before stopping, and publishes overall best-epoch predictions
-    with `best_epoch` and every executed epoch. Its top-level `lr_reduction_count`
-    counts actual ReduceLROnPlateau rate reductions over the complete run,
-    once per scheduler step even if multiple optimizer groups decrease.
-    LoRA publishes final-epoch predictions.
-    Publish matching current-only YAML sections; never rewrite historical snapshots. Successful
-    complete-run timing/global peaks and cross-epoch training/validation peaks are
-    appended atomically for holdout runs and include epochs after the selected best
-    epoch. Frozen SR2 validation logs one millisecond-precision summary every
-    `early_stopping` epochs, plus the stopping epoch without duplicate output.
-    It keeps complete epoch metrics and has no intermediate epoch logs or
-    fixed total epoch count; its configuration snapshot records effective
-    `factor`, initial `patience`, and `early_stopping` separately.
-    Builds and standalone warmup report the
-    same peak scopes in the terminal; monitoring starts after full-data build CPU
-    preparation and write preflights. Progress remains CPU-only
-    and covers executed weighted work, not extraction/publication. See
-    [reports](docs/reports.md) and [progress](docs/models.md#training-progress).
+1. **Split integrity:** All models share one saved grouped holdout. Group exchanges preserve original class/row counts, each ID has one original row, and infeasible preparation leaves the previous dataset intact. External battle deduplication keeps distinct response pairs for the same training prompt (even when shared with Kaggle train) while excluding external rows sharing any frozen validation prompt. Complete prompt + unordered response pair identify a duplicate battle; `group_id` alone does not. See [data preparation](docs/data-preparation.md).
+2. **Input and output order:** Validate unique original IDs with `is_swapped=False` before execution. Render alternating user/assistant turns with the tokenizer's official chat template (no system message or generation prompt, preserving its default reasoning block and trailing newline) and encode with `add_special_tokens=False`. Predictions use the fixed competition column order with finite normalized probabilities. See [conversation serialization](docs/data-preparation.md#conversation-serialization).
+3. **Profile objectives:**
+   - SR2 trains on original rows only, using fused L/M subtractive cross projections for wins, shared dropout mask, and clamped nonnegative `C_A`/`C_B` for `z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff` in FP32 with autocast disabled (`u_eff = 0.01 * softplus(u / 0.01)`, fixed `t` defaulting to `√5`).
+   - Architecture `swap_equivariant_abs_diff_v10` (`cross_projected_clamped_win_sum_diff`, `2Dh + 3h + 1` trainable params, 3 linear calls) uses `1/sqrt(2D)` for L/M, `0.1/sqrt(h)` for win readout, zero `B1`/`tie_bias`, and `U_0 ~ U(0.5 * mean, 1.5 * mean)` with `mean = 0.2 / (3h)` encoded via `0.01 * invsoftplus(U_0 / 0.01)` (`scaled_uniform_clamped_gelu_tie_v6`).
+   - Frozen SR2 uses this same head/init without adapters (`ReduceLROnPlateau` for validation; exponential decay for builds). See [head definition](docs/lora.md#swap-equivariant-head).
+4. **Cache identities:** Distinguish tokens, frozen/warmup features, plans, warmup state, and production checkpoints. Map cached entries to current rows/labels; version identities when representation/algorithm changes. See [caching](docs/caching.md).
+5. **CPU preparation:** Token/loader/plan preparation must not load model weights or initialize CUDA. Full-data builds complete CPU prep and destination write preflights before CUDA/weight loading; staged checkpoints pass CPU readback before replacing prior artifacts.
+   - Complete frozen-model/warmup feature hits skip backbone weights while retaining input/hardware checks.
+   - Complete inline warmup hits skip warmup; standalone warmup hits and frozen-SR2 build hits evaluate current data without training or rewriting caches.
+   - Frozen SR2 validation always starts a fresh head (no completed head-state cache).
+   - Exponential decay (`exponential_endpoint_epoch_v2`, `warmup_build_min_lr`) reuses exact target epochs only; fixed-rate partial hits resume from the largest compatible lower epoch via index-only shuffle replay and RNG restoration.
+6. **LoRA inputs and attention:** Never truncate adapter inputs. Right-pad without masks, pool the last real token, preserve scoped SDPA/checkpoint settings, and restore global flags after failures. See [hardware and input limits](docs/lora.md#hardware-and-input-limits).
+7. **Optimizer groups and schedules:** Preserve row-normalized loss, one clipping/update boundary per finalized group, short-tail merging, and merged joint update last; epoch length queries must not mutate RNG.
+   - Packing and checkpointing use `rows * (longest_A + longest_B)` (better of contiguous DP vs. best-fit by micro-batch count, then padded tokens; ties keep best-fit). Both branch graphs stay live until one backward pass.
+   - Joint training holds `learning_rate` for `lr_decay_delay_epochs` (default `0`), then applies one cosine curve across remaining updates (including FP16-skipped updates).
+   - Head warmup and frozen SR2 builds apply epoch-start exponential decay from `learning_rate` to `build_min_lr` (default `learning_rate / 5`, finite in `(0, learning_rate]`). `build_epochs: 0` creates no scheduler.
+   - Frozen SR2 validation steps `ReduceLROnPlateau` (`threshold=0`, `min_lr=0`, `eps=1e-8`) on unsmoothed validation loss; each completed `early_stopping` non-improving window with `patience > 0` decrements `patience` by `1` in place and resets the counter without restoring `patience` on later improvements. See [batching](docs/lora.md#optional-token-budget-training-batches).
+8. **Precision:** Trainable adapter/head parameters, gradients, and AdamW moments stay FP32. BF16 features, explicit BF16 win computation (head autocast disabled), and FP32 tie/logit arithmetic retain documented policy. BF16 LoRA input upcasting is disabled once after adapter init; evaluation disables gradient checkpointing. See [precision](docs/lora.md#hardware-and-input-limits).
+9. **Warmup state:** Publish only completed, validated head/optimizer/scaler/RNG states. Cache identity includes sorted training `(id, label)` pairs and supplement SHA-256 when enabled (train supplement for holdout/standalone; build supplement for builds).
+   - Warmup epochs evaluate full train (with final weights, no dropout, warmup smoothing) and validation (unsmoothed) before publishing.
+   - Joint training clears AdamW moments and step counters once on entry (preserving weights, param groups, `GradScaler`, and RNG).
+   - Adapter-free features persist by branch tokens, backbone identity, precision, storage dtype, and pooling policy; live LoRA features are never persisted. See [warmup](docs/caching.md#lora-head-warmup).
+10. **Placement and production state:** Load backbones directly on `gpu.device` without replicas or CPU/disk offload. Builds save `adapter[_TAG].pt` (no optimizer state) before exporting `merged[_TAG]/` on CPU at build precision via staged replacement with backup/restore. See [GPU layout](docs/configuration.md#gpu-configuration) and [checkpoints](docs/lora.md#checkpoints).
+11. **Publication:** Stage generated artifacts before exposure. `CacheStorage` owns locks/checksums/multipart policy; Windows staging directories inherit project ACLs (do not publish `mkdtemp` directories with private ACLs).
+12. **Metrics and history:**
+    - Frozen SR2 validation ignores fixed epoch counts, publishes `best_epoch` predictions/loss (plus `lr_reduction_count` and all executed epochs), and logs millisecond-precision summaries every `early_stopping` epochs plus the stopping epoch. LoRA publishes final-epoch predictions.
+    - Publish matching current-only YAML snapshots; never rewrite historical snapshots.
+    - Successful holdout runs atomically append global and cross-epoch `training`/`validation` GPU peaks and complete-run timings; builds/standalone warmup report the same peak scopes in the terminal. Progress remains CPU-only over executed work. See [reports](docs/reports.md) and [progress](docs/models.md#training-progress).
 
 ## Documentation maintenance
 

@@ -1,82 +1,80 @@
-# 外部训练数据参考（来源、标签与当前接入规则）
+# External Training Data Reference (Sources, Labels, and Integration Rules)
 
-[Documentation index](../README.md) · [完整候选外部数据集参考](external-training-data.md)
+[Documentation index](../README.md) · [Candidate external datasets](external-training-data.md)
 
-本文档从 [external-training-data.md](external-training-data.md) 中记录当前已接入的 Arena human 与 Arena expert，并说明已确定的处理规则与来源说明。接入并不代表已证明能改善竞赛结果。
+This document records the currently integrated external datasets from [external-training-data.md](external-training-data.md) — Arena human and Arena expert — along with the adopted processing rules and source notes. Integration does not imply proven competition gains.
 
-2026-11-17 的[数据来源排查](data-source-audit-2026-11-17.md)发现显著分布差异，并修正两项来源判断：HelpSteer3 的零分来自个人偏好评分聚合，不能等同于 Arena 用户直接选择的原生平局；Arena expert 根据问题内容筛选专家级任务，不能仅据名称认定投票经过专业专家复核或噪声更低。随后移除了 HelpSteer3 preference。
+The 2026-11-17 [source audit](data-source-audit-2026-11-17.md) identified significant distribution shifts and corrected two source assumptions: HelpSteer3's zero scores come from rounded annotator disagreement rather than direct Arena tie votes, and Arena expert filters prompts by topic rather than using credentialed expert voters or lower-noise labels. HelpSteer3 preference was subsequently removed.
 
-## 已确定的处理原则
+## Adopted processing principles
 
-**数据混合与类别比例**：清洗、去重并隔离冻结验证集后，训练时以当前流程的 Kaggle 训练行为基准，从外部英文排序表选入相同数量的样本，并匹配平局数。平局和非平局分别按 `rank` 由小到大选取，所有入选行等权。[外部样本选取规则](data-preparation.md#ranked-external-training-selection)
+**Data mixture and class proportions:** After cleaning, deduplication, and validation isolation, training selects the same number of rows and ties from the external English rarity ranking as the active Kaggle training scope. Ties and non-ties are selected separately in ascending `rank` order, with equal training weight per row. See [ranked external selection](data-preparation.md#ranked-external-training-selection).
 
-* **合并表保留原始类别比例**。各预设从 [220,492 行真实合并集](data-preparation.md#merged-external-preferences)取数，并保留 11,495 行冻结的 Kaggle 验证数据。两个补充集路径均设为 `null`，停用[平局复制](data-preparation.md#tie-duplication)和[合成自回复平局](data-preparation.md#scope-specific-synthetic-ties)。历史 204,110 行版本见[外部非 tie 降采样](data-preparation.md#external-non-tie-downsampling)。
+* **Merged table preserves raw class ratios:** Presets draw from the [220,492-row real preference merge](data-preparation.md#merged-external-preferences) while keeping the 11,495 Kaggle validation rows frozen. Both supplement paths are set to `null`, disabling [tie duplication](data-preparation.md#tie-duplication) and [synthetic self-response ties](data-preparation.md#scope-specific-synthetic-ties). For the historical 204,110-row snapshot, see [external non-tie downsampling](data-preparation.md#external-non-tie-downsampling).
+* **Synthetic tie adjustment (when enabled):** Preserves initial selections and full-win swaps. If `1/3` fractional histories prevent a final half-win swap, one or two exact-fraction same-prompt swaps are used instead (preferring fewer swaps, smaller total token-length change, and original candidate order; score-lowering steps run first while preserving prompt coverage, supplement count, and an exact `1/2` mean).
 
-合成时保留原有初选与全胜替换；若历史分数中的 `1/3` 等比例使最后一次半胜替换不可行，允许用一次或两次同 prompt 的精确分数替换完成调整。优先使用更少的替换，再比较总 token 长度变化和原有候选顺序；先执行降低分数的步骤，始终保留初始 prompt 覆盖与补充条数，最终均值仍须精确为 `1/2`。
+**Hard labels only:** No soft labels, sample weights, or weak-preference filtering are applied; each valid vote counts as one vote.
 
-**全部使用硬标签**。不生成软标签、加权或删除弱偏好样本；每条有效投票计一票。
+**Language and domain retention:** Non-English text is kept verbatim during merging under the same structural, deduplication, and validation-isolation checks, while training selection is restricted to the English ranking CSV. Complete branch lengths are counted without truncation: rows exceeding the old `13,866`-token ceiling but within the model's `max_position_embeddings=40960` are kept, and battles exceeding `40,960` on either branch are excluded and saved separately. Model and warmup `max_length` are set to `40960`.
 
-**合并阶段保留语言与领域**：非英文内容保留原文，执行与英文内容相同的结构校验、去重与验证集隔离。训练阶段的外部候选限于英文排序表。合并表完整统计分支长度，超出旧 `13866` token 上限但未超过原模型上下文的样本保留原文。任一完整分支超过固定模型版本的 `max_position_embeddings=40960` 时，整条对局移出训练集并单独保存。当前模型及 warmup 的 `max_length` 同步设为 `40960`。
+* All Arena human categories (code, math, creative writing, instruction following, etc.) and all Arena expert `occupational_tags` are retained.
 
-* Arena human 的代码、数学、创意写作、指令遵循等类别，以及 Arena expert 的全部 `occupational_tags` 均保留，不据此过滤。
+**Multimodal exclusion:** Any battle containing non-text content (e.g., images, audio) in either branch or in backfilled history is excluded in full rather than stripping media and keeping the original label. Pure-text content lists are concatenated in order; empty responses follow the rules below.
 
-**多模态样本整条排除**：任一分支的当前对话或需要回填的历史中包含图片、音频等非文本内容时，排除整条样本，不通过删除非文本部分后保留文本来沿用原标签。纯文本消息的内容列表按原顺序提取、拼接文本；空回复按下述规则处理，不因文本为空而直接删除。
+**Malformed structure and empty responses:** Unalignable records — unsupported roles (e.g., `system`), mismatched turn counts, or unrecoverable history — are dropped without rewriting roles or concatenating turns.
 
-**异常结构与空回复**：删除无法严格对齐为 `user` / `assistant` 交替轮次的样本，包括含不支持的 `system` 等角色、轮次数不一致或无法还原完整上下文的样本；不改写角色或强行拼接消息修复结构。
+* **Single-side empty response:** Retained with its original hard label; the non-empty side is not auto-assigned as winner.
+* **Both-sides empty or identical responses:** Final-turn empty responses on both sides, or identical `response_a == response_b` (without stripping whitespace), are corrected to `tie`, overriding the raw label.
 
-* **单侧空回复**：保留样本及原始硬标签，不自动将非空侧判为胜方。
-* **双侧空回复**：当前末轮两侧回复都为空时判平；完整 `response_a == response_b` 的样本也统一判平，覆盖原始偏好标签。空字符串与 `null` 回复按空回复处理，不去除空白字符。
+**Complete context and battle deduplication:** Every valid vote retains its full conversation context; multi-turn or shared session history is not treated as a duplicate unless the actual battle repeats.
 
-**每条有效投票保留其完整上下文；多轮或共享历史本身不算重复，实际重复的对局才去重。**
+* Kaggle `prompt` and `response_a/b` arrays already store all turns; Arena follow-up votes (`evaluation_order > 1`) backfill prior history from `full_conversation`.
+* `evaluation_order` tracks voting sequence within an `evaluation_session_id`, not turn count. Because models may be resampled after a vote, all valid evaluations in a session provide distinct training signal.
+* Deduplication keys on complete prompt context and unordered A/B response pair (catching A/B swaps). Distinct response pairs for the same prompt are kept; `group_id` is only for prompt grouping and validation isolation.
+* **Kaggle-only precedence:** When an external battle duplicates a Kaggle training row, Kaggle is kept. LMSYS, Arena human, and Arena expert have equal standing.
 
-* Kaggle 的 `prompt`、`response_a/b` 数组直接保存各轮内容；Arena 的后续评估则需结合 `full_conversation` 补齐此前历史。
-* `evaluation_order` 是同一 `evaluation_session_id` 内的投票顺序，不是对话轮数。投票后可能重新抽取模型，因此同一会话中的不同评估均可提供有效训练信号，不因 `evaluation_order > 1` 而删除，也不限定每会话只留一条。
-* 去重依据完整 prompt 上下文和 A/B 回答对，并识别 A/B 互换的重复；同 prompt 下的不同回答对全部保留。`group_id` 仅用于 prompt 分组和验证隔离，不能单独作为训练样本去重键。
-* **重复对局仅 Kaggle 优先**：外部样本与 Kaggle 训练样本重复时保留 Kaggle。LMSYS 与 Arena human、Arena expert 等其他外部数据同等地位，不因已接入训练集或专家标注身份而获得来源优先级。
+**Hard-vote merging across external duplicates:** Duplicate copies of the same raw vote count once; independent votes on the same battle are aligned to a common A/B direction and resolved by majority vote. Ties for the highest vote count drop the entire battle rather than converting it to `tie`. Retained battles emit one row with training weight `1`.
 
-**外部重复对局的硬标签合并**：同一原始投票的重复副本只计一次；同一对局的不同独立投票统一 A/B 方向后，选择得票最多的类别。最高票并列时删除整组对局，不将其改判为平局。最终每个保留对局只有一条训练样本，训练权重为 `1`，不随投票数增加。
+* Swapping A/B swaps A-win and B-win labels while leaving `tie` unchanged; identical or both-empty responses are corrected to `tie` before counting. All independent votes have equal weight.
+* Example: two A-wins and one B-win retain A-win; one A-win and one tie drop the battle. The smallest internal ID supplies the content and A/B orientation without extra vote weight.
+* Arena human/expert share `arena:{id}` vote identities; LMSYS uses `(question_id, judge, tstamp)`. Conflicting content or corrected labels under the same `vote_id` halt publication and save a conflict audit.
+* External battles duplicating Kaggle training rows keep the Kaggle label without entering external voting; validation prompt isolation always applies first.
 
-* A/B 互换时同步交换 A 胜和 B 胜标签，平局不变；同回复及双侧空回复在计票前修正为平局。各独立投票等权，不按来源或专家身份加权。
-* 例如，A 胜两票、B 胜一票时保留 A 胜；A 胜一票、平局一票时删除对局。选取最小内部 ID 的记录保存对局内容及 A/B 方向，不赋予该记录的标签额外票权。
-* Arena human/expert 共享 `arena:{id}` 投票身份；LMSYS 使用 `question_id`、`judge`、`tstamp` 组合。同一投票身份的对局内容或修正后标签矛盾时停止发布，并保存冲突审计。
-* 外部样本与 Kaggle 训练样本重复时仍只保留 Kaggle 原标签，不参与外部计票；验证集 prompt 隔离规则保持不变。
-
-| 比较范围 | 条件 | 处理方式 |
+| Comparison scope | Condition | Action |
 | --- | --- | --- |
-| 外部样本内部、不同外部数据集之间 | 同 prompt，回答对不同 | 全部保留 |
-| 外部样本与 Kaggle **训练集** | 同 prompt，回答对不同 | 保留外部样本 |
-| 外部样本与 Kaggle **训练集** | 完整 prompt 和回答对均相同，包括 A/B 互换 | 保留 Kaggle，删除重复外部样本 |
-| 外部样本内部、不同外部数据集之间（含 LMSYS） | 完整 prompt 和回答对均相同，包括 A/B 互换 | 同一投票副本只计一次；独立投票统一方向后取最多票类别，最高票并列则删除；保留对局的权重为 `1` |
-| 外部样本与冻结的 Kaggle **验证集** | prompt 相同 | 排除外部样本，保持验证集按 prompt 隔离 |
+| Within/across external datasets | Same prompt, different response pair | Keep all |
+| External vs. Kaggle **train** | Same prompt, different response pair | Keep external sample |
+| External vs. Kaggle **train** | Identical prompt and response pair (including A/B swap) | Keep Kaggle, drop external duplicate |
+| Within/across external datasets (including LMSYS) | Identical prompt and response pair (including A/B swap) | Deduplicate identical `vote_id`; majority vote in aligned A/B order; drop highest-count ties; weight `1` |
+| External vs. frozen Kaggle **validation** | Same prompt (`group_id`) | Exclude external sample to preserve prompt isolation |
 
-## 已接入的数据集
+## Integrated datasets
 
-| 数据集 | 规模 | 采集/发布时间 | 覆盖范围 | 标签映射 | 授权协议 |
+| Dataset | Size | Window / release | Coverage | Label mapping | License |
 | --- | --- | --- | --- | --- | --- |
-| [`lmarena-ai/arena-human-preference-140k`](https://huggingface.co/datasets/lmarena-ai/arena-human-preference-140k) | 135,634 行 | 2025-04-17 至 2025-07-24 | 126 种语言（英文 >50%）；53 个模型 | `winner`: `model_a` -> `0`，`model_b` -> `1`，`tie` / `both_bad` -> `2` | Prompts `CC-BY-4.0`；输出受各模型提供商条款约束 |
-| [`lmarena-ai/arena-expert-5k`](https://huggingface.co/datasets/lmarena-ai/arena-expert-5k) | 5,128 行 | 2025 年发布 | 35 种语言；105 个模型；含 `occupational_tags` | `winner`: `model_a` -> `0`，`model_b` -> `1`，`tie` / `both_bad` -> `2` | Prompts `CC-BY-4.0`；输出受各模型提供商条款约束 |
+| [`lmarena-ai/arena-human-preference-140k`](https://huggingface.co/datasets/lmarena-ai/arena-human-preference-140k) | 135,634 rows | 2025-04-17 to 2025-07-24 | 126 languages (>50% English); 53 models | `winner`: `model_a` -> `0`, `model_b` -> `1`, `tie` / `both_bad` -> `2` | Prompts `CC-BY-4.0`; outputs per model terms |
+| [`lmarena-ai/arena-expert-5k`](https://huggingface.co/datasets/lmarena-ai/arena-expert-5k) | 5,128 rows | Released 2025 | 35 languages; 105 models; `occupational_tags` | `winner`: `model_a` -> `0`, `model_b` -> `1`, `tie` / `both_bad` -> `2` | Prompts `CC-BY-4.0`; outputs per model terms |
 
-## 各自的使用注意事项（仅供参考）
+## Dataset-specific notes
 
 ### 1. `lmarena-ai/arena-human-preference-140k`
 
-* **Arena 来源，但存在显著分布变化**：原生 4 类投票与竞赛形式相近；2025 年模型世代、语言、文本长度和多轮历史均有明显变化。较晚的采集时间不能证明它更贴合竞赛目标；本地量化差异与最新验证退步见[来源排查](data-source-audit-2026-11-17.md#2-实际训练混合与竞赛数据的差异)。
-* **内容解析与多模态排除**：`conversation_a` / `conversation_b` 中每条消息的 `content` 为字典列表（如 `[{"type": "text", "text": ..., "image": null, "mimeType": null}]`）。纯文本内容按原顺序提取拼接；当前对话或需回填的历史含实际非文本内容时整条排除，空回复沿用上述已确定规则。
-* **处理 `evaluation_order > 1`**：`conversation_a/b` 保存当前评估的对话，可能包含多轮；此前评估的历史保存在 `full_conversation`（模型侧键名为 `model_side_a` / `model_side_b`）。按上述已确定原则为每条有效投票补全对应的 A/B 上下文，保留当前评估的标签；历史回复可能来自此前评估的其他模型。字段定义见[官方数据集说明](https://huggingface.co/datasets/lmarena-ai/arena-human-preference-140k#overview)。
-* **完整长度统计**：序列最长可达 128 条消息，用固定版本的 `Skywork/Skywork-Reward-V2-Qwen3-4B` tokenizer（`sr2-qwen3-chat-template-v1`）统计完整分支长度；任一分支超过模型的 `40960` token 上限时整条移出，不截断后沿用原标签。
+* **Distribution shift:** Uses the same 4-class Arena voting format, but 2025 models, languages, lengths, and multi-turn rates differ markedly from 2024 Kaggle data. See [source audit](data-source-audit-2026-11-17.md#2-training-mixture-vs-competition-data).
+* **Content parsing & multimodal exclusion:** Message `content` in `conversation_a/b` is a list of dicts (e.g., `[{"type": "text", "text": ..., "image": null, "mimeType": null}]`). Pure-text entries are concatenated in order; non-text media anywhere in the battle or backfilled history excludes the row.
+* **`evaluation_order > 1`:** `conversation_a/b` hold the current evaluation's conversation; prior turns live in `full_conversation` under `model_side_a` / `model_side_b`. Backfill preserves earlier turns (which may come from previously sampled models) and keeps the current vote. See the [dataset card](https://huggingface.co/datasets/lmarena-ai/arena-human-preference-140k#overview).
+* **Length checking:** Sequences up to 128 messages are tokenized with the pinned `Skywork/Skywork-Reward-V2-Qwen3-4B` tokenizer (`sr2-qwen3-chat-template-v1`); either branch exceeding `40960` tokens excludes the battle without truncation.
 
 ### 2. `lmarena-ai/arena-expert-5k`
 
-* **专家级问题筛选**：官方用 DeepSeek-v3-0324 根据 prompt 判断专家级推理或知识，不据回答评定该标签。该筛选方式不能证明投票人经过专业资格审核，或标签噪声低于其他 Arena 投票。见[官方方法说明](https://arena.ai/blog/arena-expert)。
-* **字段键名差异**：整体结构与 `140k` 相似，但 `full_conversation` 内的模型侧键名为 `model_a` / `model_b`（而非 `140k` 的 `model_side_a` / `model_side_b`），解析脚本需分别兼容。
-* **源文件表示**：对话字段为包含 NumPy `array(..., dtype=object)` 的字符串表示，空内容还可能表示为 `array([], dtype=float64)`，外层元素间可能省略逗号。转换器仅解析受限容器语法，逐个还原字符串字面量，不执行表达式、不替换回复文本；空内容数组正常保留，源表示中的实际省略号或无法完整解析的记录排除并审计。
-* **跨集去重**：与 `arena-human-preference-140k` 存在来源及时间重叠，同时使用时应识别重复来源 `id`，并按完整上下文与回答对识别重复对局；`group_id` 用于 prompt 分组与验证隔离，不单独作为训练样本重复的依据。同样执行纯文本提取、整条多模态样本排除、上下文回填与完整长度统计。
+* **Expert prompt tagging:** Uses DeepSeek-v3-0324 on prompts alone to assign `occupational_tags`; this does not imply credentialed expert annotators or lower label noise. See the [official blog](https://arena.ai/blog/arena-expert).
+* **Key naming difference:** `full_conversation` uses `model_a` / `model_b` instead of `140k`'s `model_side_a` / `model_side_b`.
+* **Source serialization:** Conversation fields are stringified NumPy `array(..., dtype=object)` representations (with empty lists as `array([], dtype=float64)` and occasional missing commas). The parser decodes only restricted container literals without `eval`; unparseable records or literal ellipses are excluded and audited.
+* **Cross-dataset deduplication:** Overlaps in time and source with `140k`; shares `arena:{id}` vote identities and undergoes full context/pair deduplication, multimodal exclusion, and length filtering.
 
-## 接入本项目时的通用提醒（仅供参考）
+## Integration reminders
 
-* **冻结验证集与去重**：保持 [validation_ids.csv](../data/processed/lmsys33k/validation_ids.csv) 的 11,495 条 Kaggle 验证 ID 不变；按规范化 prompt JSON 计算 `group_id`（SHA-256），排除与冻结验证集 prompt 重合的新增样本。其余新增样本按完整 prompt 上下文与回答对内部及跨外部数据集去重，再与现有 Kaggle **训练集**及 LMSYS 训练样本按相同依据去重。同 prompt 的不同回答对全部保留，包括外部样本与 Kaggle 训练集同 prompt 的情况；新增数据只写入 `split="train"` 且 `is_swapped=False`。
-* **同回复判平与无截断检查**：将 `response_a == response_b` 或双侧空回复的样本修正为 `label=2` 及整数 one-hot winner 字段。所有保留样本经 `sr2-qwen3-chat-template-v1` 完整编码并记录两支长度，不按旧上限排除样本；回复文本为空不代表聊天模板编码后的分支没有 token。
-* **ID 分段与配置联动**：
-  * `id` 需与现有数据（Kaggle ID 及 LMSYS 的 `2**32 + row_index`）分段隔离，避免整数主键冲突。
-  * 追加训练集行数后，[TrainingInputLoader](../src/llm_classification_finetuning/models/common/inputs.py) 会校验实际验证集占比与配置的偏差（`< 0.005`），需同步更新 YAML 中的 `validation.validation_fraction` 为 `11495 / 新总行数`。
-  * 旧补充产物强绑定 `lmsys33k` 的文件 SHA-256 与 77,527 行基线。新合并数据使用独立生成的 train/build 补充集；重新合并真实数据后需重新生成补充集。不要对合并数据集运行 `uv run init` / `uv run preprocess`。
+* **Validation isolation & IDs:** Keep the 11,495 IDs in [validation_ids.csv](../data/processed/lmsys33k/validation_ids.csv) frozen. Compute `group_id` (SHA-256 of canonical prompt JSON), exclude validation prompt matches, deduplicate battles, and write new rows to `split="train"` with `is_swapped=False`.
+* **ID segmentation & config updates:**
+  * Assign `id` outside Kaggle IDs and LMSYS (`2**32 + row_index`) using `segment * 2**32 + source_row_index`.
+  * Update `validation.validation_fraction` in YAML to `11495 / total_rows` so [TrainingInputLoader](../src/llm_classification_finetuning/models/common/inputs.py) passes its `< 0.005` deviation check.
+  * Regenerate any configured supplements after rebuilding the real merge. Do not run `uv run init` or `uv run preprocess` on merged datasets.

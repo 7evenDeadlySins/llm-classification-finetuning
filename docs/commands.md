@@ -2,218 +2,67 @@
 
 [Documentation index](../README.md)
 
-Run from the project root after [setup](getting-started.md). All entry points
-accept `--config PATH`, defaulting to `config.yaml` in the working directory,
-except the batch scripts, which select configs through their constants.
-Use `uv run COMMAND --help` to inspect the installed parser.
+Run commands from the project root after [setup](getting-started.md). All entry points accept `--config PATH` (default `config.yaml`), except the batch scripts, which configure selections via constants. Run `uv run COMMAND --help` for full parser options.
 
 ## Entry points
 
-| Command | Purpose | Output with default paths |
+| Command | Purpose | Default output |
 | --- | --- | --- |
-| `uv run init` | Download missing training data and rebuild processed data | `data/processed/train_validation.parquet` |
-| `uv run data` | Download missing Kaggle training data only | `data/raw/train.csv` |
-| `uv run preprocess` | Rebuild the split from local `train.csv` | `data/processed/train_validation.parquet` |
-| `uv run model MODEL` | Validate on the saved holdout | `results/MODEL-<timestamp>/` |
-| `uv run model MODEL --build` | Train on IDs from both partitions; save a head, or LoRA adapter/head and merged backbone | `models/SR2_Qwen3_4B/head.pt`, or `models/SR2_Qwen3_4B_lora/adapter.pt` and `merged/` |
-| `uv run model warmup --build` | Train/cache an SR2 head on the train partition only | `<CACHE_PATH>/SR2_Qwen3_4B_lora_warmup/<key>.pt` |
-| `uv run result [RUN]` | Report a selected or latest validation run | `results/comprehensive/` |
-| `uv run python scripts/validate.py` | Validate explicit model/config pairs sequentially | Validation directories and `results/logs/validate-*.log` |
-| `uv run python scripts/build.py` | Build explicit model/config pairs sequentially, including standalone warmup | Frozen head, LoRA adapter/head and merged backbone, or warmup caches; `results/logs/build-*.log` |
+| `uv run init` | Download missing `train.csv` and rebuild processed split | `data/processed/train_validation.parquet` |
+| `uv run data` | Download missing Kaggle `train.csv` only | `data/raw/train.csv` |
+| `uv run preprocess` | Rebuild processed split from local `train.csv` | `data/processed/train_validation.parquet` |
+| `uv run model MODEL` | Holdout validation | `results/MODEL-<timestamp>/` |
+| `uv run model MODEL --build` | Full-data build (head, or LoRA adapter/head + merged backbone) | `models/SR2_Qwen3_4B/head.pt`, or `models/SR2_Qwen3_4B_lora/adapter.pt` + `merged/` |
+| `uv run model warmup --build` | Train/cache SR2 head on train partition only | `<CACHE_PATH>/SR2_Qwen3_4B_lora_warmup/<key>.pt` |
+| `uv run result [RUN]` | Generate report for a selected or latest validation run | `results/comprehensive/` |
+| `uv run python scripts/validate.py` | Sequential batch holdout validation | Run dirs + `results/logs/validate-*.log` |
+| `uv run python scripts/build.py` | Sequential batch full-data builds and standalone warmup | Checkpoints/caches + `results/logs/build-*.log` |
 
-The processed `.parquet` path is logical; large files use a manifest and volumes.
-See [multipart storage](caching.md#shared-storage-and-multipart-files).
-
-`RESULT_PATH` selects the root for validation runs, reports, and
-batch logs; the table shows its default `./results`. See
-[path rules](configuration.md#configuration-files-and-paths).
+Processed `.parquet` paths are logical (single file below 100 MiB, manifest + `.parts/` above); see [multipart storage](caching.md#shared-storage-and-multipart-files). `RESULT_PATH` overrides `./results` for validation runs, reports, and batch logs.
 
 ## Model selection and execution modes
 
-`MODEL` is `SR2-Qwen3-4B`, `SR2-Qwen3-4B-lora`, or uppercase `ALL`; the separate `warmup`
-selector is build-only. Selector spelling differs from the
-[YAML section names](configuration.md#configuration-sections).
+`MODEL` is `SR2-Qwen3-4B`, `SR2-Qwen3-4B-lora`, or `ALL` (case-sensitive). `warmup` is a separate build-only selector excluded from `ALL`.
 
 | Option | Behavior |
 | --- | --- |
-| No mode flag | Holdout validation; frozen SR2 uses early stopping and publishes its best epoch, while LoRA publishes its final epoch; no production checkpoint |
-| `--build` | Train on all original IDs; save a frozen head, or LoRA adapter/head plus the merged backbone |
-| `--refresh-cache` | Rebuild requested token entries and the selected mode's model-specific caches |
-| `--checkpoint-tag TAG` | Choose frozen `head_TAG.pt`, or LoRA `adapter_TAG.pt` and build `merged_TAG/`; build only |
+| *(default)* | Holdout validation; frozen SR2 publishes `best_epoch` (early stopping), LoRA publishes final epoch; no production checkpoint |
+| `--build` | Train on all original IDs across both partitions; save production checkpoint (and merged backbone for LoRA) |
+| `--refresh-cache` | Rebuild requested token entries and mode-specific caches |
+| `--checkpoint-tag TAG` | Write `head_TAG.pt` or `adapter_TAG.pt` + `merged_TAG/` (`--build` only; ASCII `[A-Za-z0-9][A-Za-z0-9_-]*`) |
 
-A checkpoint tag starts with an ASCII letter or digit and contains only ASCII
-letters, digits, `_`, or `-`. It requires `--build`. Without a tag, builds replace
-frozen `head.pt`, or LoRA `adapter.pt` and `merged/`. See
-[build outputs](models.md#full-data-builds).
-
-`ALL` runs configured frozen SR2 before LoRA. It accepts the same mode, refresh,
-and tag options, continues after model failures, and exits with status `1` if any
-fail. An empty selection is an error. The entire YAML is validated before any
-model runs.
+`ALL` runs configured frozen SR2 before LoRA, continues past individual failures, and exits `1` if any fail. The entire YAML is validated before any model runs.
 
 ## Standalone warmup
 
-`warmup` is a separate selector requiring `--build`. It accepts `--config` and
-`--refresh-cache`; the default validation command mode and `--checkpoint-tag`
-are unsupported.
-It is excluded from `ALL`.
+`uv run model warmup --build` accepts `--config` and `--refresh-cache` (validation mode and `--checkpoint-tag` are unsupported). It trains the SR2 head on original train-partition rows using `warmup.model_name` and evaluates full-train (warmup-smoothed) and validation (unsmoothed) losses after each epoch on shared frozen features.
 
-It prepares train and validation tokens, then trains the SR2 comparison head
-only on original train-partition rows using the non-quantized backbone configured
-in `warmup` (Skywork in the shipped presets). After each epoch, it evaluates the
-entire training set with the final epoch weights and warmup label smoothing,
-then evaluates validation with unsmoothed log loss. Both evaluations disable
-dropout and reuse the frozen features loaded or extracted before training.
-The epoch logs and final summary report both losses to six decimal places.
-
-A complete compatible head hit restores the head, loads the backbone, and loads
-cached train/validation features, extracting only missing branches, to recompute
-both losses without training or rewriting the head-warmup cache; it reports zero
-executed epochs. There are no adapters, joint
-training, production checkpoints, or result reports. It shares SR2's cache
-namespace; a validation run can reuse it when effective settings and training
-IDs match. Exponential decay reuses only the exact target epoch; a different
-target starts a complete new run on a cache miss. With `warmup.build_min_lr = warmup.learning_rate`,
-if only a compatible lower-epoch cache exists, the command selects the largest
-completed epoch, trains the remaining epochs, and writes a separate target cache. The
-summary displays `Resumed` and counts only newly executed epochs.
-Normal full-data model builds train on both partitions.
-See [warmup configuration](configuration.md#standalone-warmup) and
-[cache reuse](caching.md#standalone-warmup-build).
+- **Exact cache hit:** Restores head, loads backbone + cached features (extracting only missing branches), recomputes both losses (`0` executed epochs), and does not rewrite the cache.
+- **Fixed-rate continuation (`warmup.build_min_lr = warmup.learning_rate`):** Resumes from the largest compatible lower-epoch cache, trains remaining epochs, and writes a separate target cache (`Resumed`). Exponential decay reuses only exact target-epoch caches.
+- Produces no adapters, joint training, production checkpoints, or result reports. See [warmup configuration](configuration.md#standalone-warmup) and [cache reuse](caching.md#standalone-warmup-build).
 
 ## Cache refresh
 
-`--refresh-cache` affects only entries requested by the selected execution mode.
-For LoRA validation/build with warmup enabled, it forces a new warmup and
-refreshes requested tokens, warmup feature entries, and batch plans. Standalone
-warmup also refreshes its requested tokens, features, and head state. Frozen SR2
-validation/build refreshes requested tokens, features, and shared head state.
-Refresh is not a checkpoint rebuild or a request to delete all existing caches;
-see [cache identities](caching.md).
+`--refresh-cache` refreshes only entries requested by the active mode (tokens, warmup/frozen features, batch plans, and mode-specific head state)—it does not delete unrelated caches or Hub weights. See [cache identities](caching.md).
 
-## Batch validation
+## Batch validation and builds
 
-[scripts/validate.py](../scripts/validate.py) runs holdout validation only. Each
-task invokes `uv run model MODEL --config PATH` from the project root. It does
-not support the standalone `warmup` selector; model-internal head warmup still
-follows the selected YAML.
+- [`scripts/validate.py`](../scripts/validate.py) runs holdout validation (`uv run model MODEL --config PATH`) and logs to `<RESULT_PATH>/logs/validate-*.log`. Does not support `warmup`.
+- [`scripts/build.py`](../scripts/build.py) runs full-data builds and standalone warmup (`uv run model MODEL --config PATH --build`) and logs to `<RESULT_PATH>/logs/build-*.log`. Does not pass `--checkpoint-tag` (sequential builds for the same model overwrite default outputs).
 
-Validation logs use `<RESULT_PATH>/logs/validate-*.log`.
+Both scripts are configured via top-level `CONFIG_DIR` and `MODEL_CONFIGS` constants (currently `validate.py` runs `SR2-Qwen3-4B` on `l1.yaml`–`l4.yaml`; `build.py` runs `SR2-Qwen3-4B-lora` on `l1.yaml`). They run in dictionary/list order, load `.env` from the project root, stream combined output to terminal and UTF-8 log, continue past task failures, and exit `1` if any task fails.
 
-Before each task starts, the script loads its YAML through `AppConfig` and checks
-the resolved `data.processed_path`, `data.external_rank_path`, and any configured
-train supplement from the project root. Complete local data is
-used directly. The same batch can mix repository-backed configurations and
-the current numbered presets, whose prebuilt data is not included in Git. The script does not
-download raw data or run preprocessing.
+### Project mirror (`--data-source-root`)
 
-To fill missing processed-data files from a mounted Drive or another project
-mirror, pass an optional source root:
+Both batch scripts verify each task's `data.processed_path`, `data.external_rank_path`, and scope supplement (`train_supplement_path` for validation/warmup; `build_supplement_path` for builds) before launching the child process. Pass `--data-source-root PATH` to fill missing or wrong-sized files/volumes from a Drive mount or mirror:
 
 ```bash
 uv run python scripts/validate.py --data-source-root /content/drive/MyDrive/llm-classification-finetuning
-```
-
-The mirror preserves project-relative paths, including
-`data/processed/external_merged/` and `data/processed/external_english_rarity_rank.csv`.
-Relative source roots resolve
-from the project root, and `~` expands to the home directory. Without this
-argument, only local data is checked. A complete local
-artifact does not access the source root. An absolute processed path outside the
-project can be used locally, but missing files there cannot be mapped to the
-mirror.
-
-For multipart data, a local manifest remains authoritative; otherwise, a local
-single Parquet is used before looking at the source. When both local entrypoints
-are absent, a source manifest takes precedence over a source single file. The
-script checks manifest metadata, referenced files, and volume sizes, copying only
-missing or wrong-sized volumes. Correct local volumes need not also exist in the
-source. New manifests publish after all their volumes are ready. SHA-256 and
-table validation remain in the model loader; malformed existing manifests fail
-without being replaced. Successfully prepared paths are reused within the batch.
-
-Data-preparation failures skip that task and continue the batch. The log includes
-the YAML/model and missing local/source paths, and the final status is nonzero if
-any task fails. The batch log streams data preparation and child model output.
-When preparation copies files, it reports the total file count for that task.
-
-## Batch builds
-
-[scripts/build.py](../scripts/build.py) runs full-data builds and standalone
-warmup. Each task invokes `uv run model MODEL --config PATH --build` from the
-project root. A `warmup` task creates or reuses the train-partition head-warmup
-cache; frozen SR2 builds its full-data head, and LoRA builds adapter/head and merged backbone.
-For example, this selection runs standalone warmup before a full-data build:
-
-```python
-MODEL_CONFIGS: dict[str, list[str]] = {
-    "warmup": ["1.yaml"],
-    "SR2-Qwen3-4B-lora": ["3.yaml"],
-}
-```
-
-Standalone warmup and full-data builds use different training ID sets; see
-[cache reuse](caching.md#standalone-warmup-build). Build logs use
-`<RESULT_PATH>/logs/build-*.log`.
-
-Before launching a task, the build script loads its YAML and ensures the saved
-data, any configured ranking CSV, and the supplement for that scope. It uses
-`data.build_supplement_path` for model builds and `data.train_supplement_path`
-for standalone warmup, through the same pipeline as
-[batch validation](#batch-validation). Pass an optional project mirror to fill
-missing files:
-
-```bash
 uv run python scripts/build.py --data-source-root /content/drive/MyDrive/llm-classification-finetuning
 ```
 
-Preparation reuse keys include the saved data, ranking CSV, and selected
-supplement paths so each task has the files its configuration selects.
-
-Paths beneath the mirror follow the selected YAML rather than a fixed dataset
-directory. Single Parquet files and manifest-plus-volume artifacts are supported,
-with only missing files or wrong-sized volumes copied. Successfully prepared
-paths are shared within the batch and checked again after a failed model task.
-Preparation failures are recorded in the build log, skip the affected task, and
-contribute to the failure summary. Successful copies are logged as one file count
-per task. The script does not run `init` or `preprocess`.
-
-The batch script does not add `--checkpoint-tag`. Multiple configs for the same
-model replace the default `head.pt`, or `adapter.pt` and `merged/` outputs in sequence. Use the
-model CLI directly with tags when separate checkpoints are needed.
-
-### Shared batch behavior
-
-Each script selects work independently through its top-level `CONFIG_DIR` and
-`MODEL_CONFIGS` constants. Currently, `scripts/validate.py` selects
-`SR2-Qwen3-4B` with `l1.yaml`–`l4.yaml`, and `scripts/build.py` selects
-`SR2-Qwen3-4B-lora` with `l1.yaml` from `configs/`. Edit these constants to
-choose other combinations;
-there are no script CLI selection flags. Dictionary keys are registered model
-selectors, with `warmup` additionally supported by the build script. Each list
-contains filenames relative to `CONFIG_DIR`, resolved from the script's project
-root.
-
-Only listed files run; newly added YAML files are not selected automatically.
-Models run in dictionary order and filenames in list order. Empty lists skip
-a model; no selected filenames is an error. Both scripts continue after missing
-configs or failed runs, print a task summary, and exit with status `1` if any
-task fails.
-
-Each invocation streams script messages and combined child stdout/stderr to
-the terminal and one immediately flushed UTF-8 log under `<RESULT_PATH>/logs/`
-(default `./results/logs/`). Each script loads `.env` from its project root and
-resolves relative result paths there, matching its child commands.
-Unexpected exceptions and keyboard interruptions also write their traceback
-before propagating. A final `CalledProcessError` in a notebook is a wrapper;
-read the earlier model error or this log for the cause.
+Local manifests stay authoritative; when missing locally, source manifests take precedence over single files. Successfully prepared paths are shared within the batch; preparation failures skip that task and mark the batch failed without running `init` or `preprocess`.
 
 ## Report selection
 
-`RUN` is a direct child directory name under `results/`, not a path to a CSV.
-Without it, discovery selects the most recently modified eligible directory,
-then validates it; it does not search backward for a valid run. Reports always
-replace `results/comprehensive/`, so copy a report if you want to keep several.
-See [report input requirements](reports.md#report-inputs).
-
-For removed selectors and `--test`, see [migration](migration.md).
+`RUN` in `uv run result [RUN]` is a direct child directory name under `RESULT_PATH` (default `./results`). Omitting it picks the most recently modified eligible directory and validates it (without searching backward). Reports always overwrite `<RESULT_PATH>/comprehensive/`. See [report inputs](reports.md#report-inputs) and [migration](migration.md) for removed selectors/`--test`.

@@ -2,80 +2,39 @@
 
 [Documentation index](../README.md)
 
-Run project commands inside the Colab runtime, including when VS Code is the
-notebook frontend. Paths such as `/content/...` belong to that runtime; a local
-Windows terminal or local `.env` does not configure its project process.
+Run project commands inside the Colab runtime (including when VS Code is the frontend). `/content/...` paths belong to that runtime; a local Windows terminal or `.env` does not configure it.
 
 ## Run holdout validation on Colab G4
 
 ### Repeat a validation run
 
-1. Open the Drive-hosted `!validate.ipynb` directly from Colab's **Google Drive**
-   or **Recent** tab (under **My Drive → Colab Notebooks**, avoiding duplicate
-   `!validate (N).ipynb` copies) rather than uploading a local file through the
-   browser dialog, which automated browser sessions may block as a protected
-   page. When the local `!validate.ipynb` changes, update the Drive notebook
-   file directly. Reuse **My Drive → llm-classification-finetuning** and wait for
-   all changed or missing `scripts/`, `configs/`, processed data (keeping each
-   multipart manifest with its referenced volumes), and cache files to finish
-   syncing to Drive before starting—including local Google Drive for Desktop
-   uploads into shortcut-linked directories.
-2. Confirm **G4 GPU** in **Runtime → Change runtime type** and save if changed.
-   If the notebook opens stuck in a `Resuming execution` or stale session
-   state, release it first via **Runtime → Disconnect and delete runtime**. Then
-   click **Run all** directly to connect and execute without clicking **Connect**
-   separately beforehand. Approve the Drive mount when prompted; if an OAuth
-   sign-in or consent prompt requires manual interaction, hand browser control to
-   the user. If G4 is unavailable on the first attempt, `SR2-Qwen3-4B`
-   validation or full-data training that trains only the classification head may
-   use **A100 GPU** with **High RAM** off. Release any automatically assigned
-   session before switching, then click **Run all** again. Leave active sessions
-   belonging to other notebooks untouched.
-3. Monitor progress and confirm `Completed N/N tasks.` directly from the
-   Drive-synced `results/logs/validate-*.log` file (either in Drive or in a
-   locally synced `results/logs/` folder) rather than relying on Colab's
-   cross-origin output iframe—which becomes blank or unreadable from the page
-   DOM once the runtime disconnects—or downloading `.ipynb` copies. Confirm in
-   Colab that the notebook's own runtime has released (the status button returns
-   to **Reconnect** and **Disconnect and delete runtime** is disabled), then
-   open the run directories under `results/`.
+1. Open the Drive-hosted `!validate.ipynb` from Colab's **Google Drive** or **Recent** tab (under **My Drive → Colab Notebooks**, avoiding duplicate `!validate (N).ipynb` copies) rather than uploading via a browser dialog. Update the Drive file directly when local `!validate.ipynb` changes. Reuse **My Drive → llm-classification-finetuning** and wait for `scripts/`, `configs/`, processed data (keeping each manifest with its `.parts/`), and caches to finish syncing before starting.
+2. Select **G4 GPU** in **Runtime → Change runtime type**. If stuck in `Resuming execution` or a stale session, release it via **Runtime → Disconnect and delete runtime**, then click **Run all** directly (without clicking **Connect** first). Approve the Drive mount when prompted; hand browser control to the user for any manual OAuth/consent prompt.
+   - If G4 is unavailable, head-only `SR2-Qwen3-4B` validation or builds may use **A100 GPU** with **High RAM** off. Release any auto-assigned session before switching, then click **Run all**. Leave other notebooks' sessions untouched.
+3. Monitor progress and confirm `Completed N/N tasks.` in the Drive-synced `results/logs/validate-*.log` (rather than Colab's cross-origin output iframe, which blanks after disconnect). Confirm the runtime has released (**Reconnect** shown, **Disconnect and delete runtime** disabled) before opening `results/`.
 
 ### First-time Drive setup
 
-Use the project owner's shared link to identify the intended folder.
+Identify the shared folder from the project owner's link:
+- **Existing name opens the intended folder:** Reuse it.
+- **Name is available:** Add a shortcut directly under **My Drive** named `llm-classification-finetuning`.
+- **Another entry uses the name:** Compare targets; move confirmed old uploads to Drive Trash after copying needed files, then reuse or add the shortcut.
 
-- **The existing name opens the intended folder.** Reuse the entry.
-- **The name is available.** Add a shortcut to the shared folder directly under
-  **My Drive** with the name `llm-classification-finetuning`.
-- **Another entry uses the name.** Compare its target with the owner's link.
-  Move a confirmed old upload to Drive Trash after its needed files are in the
-  shared folder, then reuse or add the correct shortcut. Resolve any other
-  conflict with the owner before creating an entry.
+Keep `scripts/`, `configs/`, processed data, `cache/`, and `Hugging Face/` in the shared folder, with `DRIVE_DATA_ROOT=/content/drive/MyDrive/llm-classification-finetuning` (and `MODEL_PATH` pointing to `Hugging Face/`).
 
-Keep scripts, configs, processed data, `cache/`, and `Hugging Face/` in the
-shared project folder. Set `DRIVE_DATA_ROOT` in the notebook to
-`/content/drive/MyDrive/llm-classification-finetuning`. Use `scripts/`, `configs/`,
-`cache/`, and `results/` under that root for their respective settings, and
-`Hugging Face/` under the same root for `MODEL_PATH`.
+**Agent authorization:** The project owner authorizes the agent to complete this workflow using the approved Google account, including syncing files, confirming Drive mount, and managing the runtime through completion.
 
-**Agent authorization.** The project owner authorizes the agent to complete this
-workflow using the approved Google account, including syncing project files,
-confirming the Drive mount, and managing the runtime through completion.
+## Set up a manual runtime checkout
 
-## Set up a runtime checkout
-
-1. Select a CUDA runtime. Validation/build uses one GPU. Choose precision
-   supported by the selected device in the YAML you will
-   actually run. For a T4, use `fp16` instead of the root preset's `bf16`.
-2. Mount Drive in a notebook cell if you want persistent caches and results:
+1. Select a CUDA runtime and match YAML precision to the GPU (e.g., `fp16` on T4 instead of `bf16`).
+2. Mount Drive if you want persistent caches and results:
 
    ```python
    from google.colab import drive
-
    drive.mount("/content/drive")
    ```
 
-3. Clone the project and install its locked environment in the runtime terminal:
+3. Clone and install in the runtime terminal (use `uv run` rather than the notebook kernel's Python):
 
    ```shell
    git clone https://github.com/Esxyko/llm-classification-finetuning.git /content/llm-classification-finetuning
@@ -84,10 +43,7 @@ confirming the Drive mount, and managing the runtime through completion.
    uv sync --locked
    ```
 
-   For an existing checkout, keep or update it as intended instead of cloning
-   over it. `uv` uses the project's Python 3.14 environment; the notebook
-   kernel's interpreter can differ. Launch project work through `uv run`.
-4. Create a `.env` in that runtime checkout, for example:
+4. Create `.env` in `/content/llm-classification-finetuning`:
 
    ```dotenv
    MODEL_PATH=/content/drive/MyDrive/Hugging Face
@@ -97,182 +53,46 @@ confirming the Drive mount, and managing the runtime through completion.
    HF_HUB_OFFLINE=1
    ```
 
-   Set Kaggle credentials only if downloading raw files. Configurations that
-   use Git-backed processed data can use the saved artifacts from the checkout.
-   Populate `MODEL_PATH` with the complete native Hugging Face cache before
-   running, including the configuration, tokenizer, and all weight shards. The
-   separate local `download.ipynb` sets `HF_HUB_OFFLINE=0` for this preparation.
-   Execution stays offline and reports any missing required local files instead
-   of downloading them. Set offline mode before importing HF libraries; restart
-   the kernel if they were already imported with different settings.
-5. Run the selected configuration:
+   Populate `MODEL_PATH` with the complete native Hub cache (e.g., via `download.ipynb` with `HF_HUB_OFFLINE=0`) before offline execution. Restart the kernel if HF libraries were already imported with different settings.
+5. Run a command or batch script (note: `os.environ` in a notebook overrides `.env` for child processes):
 
    ```shell
    uv run model SR2-Qwen3-4B-lora --config configs/1.yaml
+   # or: uv run python scripts/validate.py / scripts/build.py
    ```
-
-   Or use `uv run python scripts/validate.py` for batch validation, or
-   `uv run python scripts/build.py` for batch builds and standalone warmup.
-   Check the model and config selection in the script you are running.
-   Editing `config.yaml` does not change a run that selects another YAML.
-
-A notebook's `os.environ` is inherited by subprocesses it launches and overrides
-`.env` values. A separately opened terminal does not receive later notebook
-environment changes; configure that terminal's process or the runtime `.env`.
 
 ## Where files are written
 
-| Path or setting | Writer and timing | Persistence in this workflow |
+| Path / setting | Writer & timing | Persistence |
 | --- | --- | --- |
-| `PROJECT_DIR` under `/content/` | Git checkout, installed environment, and local data | Runtime-local |
-| `MODEL_PATH` on mounted Drive | Separate online download preparation populates the native cache; offline model execution reads it | Directly on Drive; reused by later runs |
-| `CACHE_PATH` on mounted Drive | Token, embedding, batch-plan, and warmup caches publish when those stages complete | Directly to Drive; unchanged hits do not republish |
-| `RESULT_PATH` on mounted Drive | Batch logs stream during execution; completed model runs publish predictions, metrics, and YAML; comprehensive reports use their subdirectory | Directly to Drive |
-| `PROJECT_DIR/models/` | `--build` publishes adapter/head and the merged backbone directory | Runtime-local until copied separately |
-| `BUILD_OUTPUT_PATH` in `!build.ipynb` | Copy existing current SR2 build directories (`models/SR2_Qwen3_4B/`, `models/SR2_Qwen3_4B_lora/`) after the batch finishes, including after a failed batch | Timestamped backup on Drive before runtime release |
+| `PROJECT_DIR` (`/content/...`) | Git checkout, venv, local data | Runtime-local |
+| `MODEL_PATH` (Drive) | Populated separately (`HF_HUB_OFFLINE=0`); read offline | Persistent on Drive |
+| `CACHE_PATH` (Drive) | Token, embedding, plan, and warmup caches on stage completion | Persistent on Drive (hits skip writes) |
+| `RESULT_PATH` (Drive) | Streams batch logs; publishes completed validation runs and reports | Persistent on Drive |
+| `PROJECT_DIR/models/` | `--build` writes `head[_TAG].pt` or `adapter[_TAG].pt` + `merged[_TAG]/` | Runtime-local until copied |
+| `BUILD_OUTPUT_PATH` (`!build.ipynb`) | Copies current `models/SR2_Qwen3_4B/` and `models/SR2_Qwen3_4B_lora/` after batch | Timestamped backup on Drive |
 
-Setting a path does not copy existing files. Point `CACHE_PATH` and `RESULT_PATH`
-to Drive to publish their artifacts there during the run. When `RESULT_PATH` is
-missing or blank, commands use `./results` in their working directory instead.
-Large cache sessions reconstruct working files beside their logical cache;
-allow space there for [multipart storage](caching.md#shared-storage-and-multipart-files).
-
-Use paths that the mounted runtime can actually resolve and write. For a folder
-exposed through a MyDrive shortcut, check the mounted path and destination
-permissions in the runtime; a shortcut's location in the Drive web interface
-alone does not establish write access. This guide does not verify any particular
-account's shortcut target.
-
-If manual runs use a runtime-local `RESULT_PATH`, copy the completed result
-directory to Drive before releasing the runtime. With `RESULT_PATH` on Drive,
-results are already written there. Also preserve the matching processed split
-and any production checkpoint you need later. Preserve the `merged[_TAG]/`
-directory too when retaining the full trained backbone. `MODEL_PATH` contains
-downloaded original base weights; build outputs are under `PROJECT_DIR/models/`.
+Allow temporary space beside `CACHE_PATH` for [multipart reconstruction](caching.md#shared-storage-and-multipart-files). Verify write permissions on Drive shortcuts in the runtime rather than assuming web UI visibility grants write access. For manual runs with local `RESULT_PATH` or `models/`, copy outputs to Drive before releasing the runtime.
 
 ## Local notebook behavior
 
-The working copy may include `!validate.ipynb` and `!build.ipynb`. Both are
-ignored by Git and are not part of a fresh clone; the manual workflow above
-does not depend on them. Both use four cells:
+The Git-ignored `!validate.ipynb` and `!build.ipynb` each have four cells:
 
 | Cell | Action |
 | --- | --- |
-| Settings | Define repository/branch, runtime project path, `DRIVE_DATA_ROOT`, `DRIVE_SCRIPTS_DIR`, `DRIVE_CONFIGS_DIR`, model/cache/result paths, endpoint, and `HF_HUB_OFFLINE=1`; export environment settings before HF imports; builds also define `BUILD_OUTPUT_PATH` |
-| Drive | Mount `/content/drive` and create the model-cache directory |
-| Setup | Shallow-clone or fetch the selected remote branch and check it out with `cache/` excluded; write model/cache/result paths, endpoint, and `HF_HUB_OFFLINE=1` to runtime `.env`; install `uv`; synchronize dependencies |
-| Run and cleanup | First synchronize scripts and configs from Drive; validation then runs `scripts/validate.py --data-source-root DRIVE_DATA_ROOT`, flushes/unmounts Drive and requests runtime release in `finally`; builds run `scripts/build.py --data-source-root DRIVE_DATA_ROOT`, save SR2 build outputs, then perform cleanup |
+| Settings | Define repo/branch, `PROJECT_DIR`, `DRIVE_DATA_ROOT`, `DRIVE_SCRIPTS_DIR`, `DRIVE_CONFIGS_DIR`, model/cache/result paths, endpoint, `HF_HUB_OFFLINE=1` (and `BUILD_OUTPUT_PATH` for builds) |
+| Drive | Mount `/content/drive` and create `MODEL_PATH` |
+| Setup | Force-checkout the selected branch (discarding tracked runtime edits) with `cache/` excluded; write runtime `.env`; install `uv` and `uv sync --locked` |
+| Run & cleanup | Copy `DRIVE_SCRIPTS_DIR` → `PROJECT_DIR/scripts` and `DRIVE_CONFIGS_DIR` → `PROJECT_DIR/configs` (halting before batch/cleanup on failure); run `scripts/validate.py` or `scripts/build.py` with `--data-source-root DRIVE_DATA_ROOT`; back up `models/` (builds only); flush/unmount Drive and release runtime in `finally` |
 
-The setup cell forces the checkout of the selected branch in an existing
-**runtime checkout**, discarding tracked edits there. Preserve any edits you
-need before rerunning that cell. The runtime obtains project code from the
-configured remote branch and applies the Drive script and config copies in the
-final cell.
+### Data preparation, results, and build backups
 
-Before each batch, the final cell recursively copies `DRIVE_SCRIPTS_DIR` (default
-`/content/drive/MyDrive/llm-classification-finetuning/scripts`) into
-`PROJECT_DIR/scripts`, then `DRIVE_CONFIGS_DIR` (default
-`/content/drive/MyDrive/llm-classification-finetuning/configs`) into
-`PROJECT_DIR/configs`. Both copies overwrite same-named files and preserve files
-that exist only in the runtime checkout. Synchronization logs each source,
-destination, and completion. A missing source directory or copy failure stops the
-cell before the batch and its cleanup begin, leaving Drive mounted and the
-runtime available for recovery and retry.
-
-### How validation and build data is prepared
-
-Both notebooks default `DRIVE_DATA_ROOT` to
-`/content/drive/MyDrive/llm-classification-finetuning`. This directory mirrors the
-project root: the merged real preference artifact belongs at
-`<DRIVE_DATA_ROOT>/data/processed/external_merged/train_validation.parquet`, or its
-`.manifest.json` and referenced `.parts/` volumes. Place the ranking CSV at
-`<DRIVE_DATA_ROOT>/data/processed/external_english_rarity_rank.csv`. For fast
-token budgeting, keep `summary.json` and `token_stats.parquet` beside the
-merged Parquet. The batch scripts pick up these optional files when restoring
-required data from the mirror. Change the settings cell to use a different
-mirror root.
-
-Both batch scripts resolve each selected YAML's `data.processed_path` and
-`data.external_rank_path` from `PROJECT_DIR`. Complete local artifacts are
-used without accessing the Drive data mirror, so repository-backed configurations
-can run in the same `MODEL_CONFIGS` batch. For example, a model
-selection can list both `"1.yaml"` and `"2.yaml"` in order. Model builds also
-restore the configured build supplement from the mirror; validation and
-standalone warmup restore the configured train supplement. Each mode also
-requires the saved real dataset.
-
-Only missing files or wrong-sized volumes are copied into the runtime. A local
-manifest determines the required volumes, including when Drive only contains the
-volumes still needed locally. When no local entrypoint exists, the script uses a
-Drive manifest before a Drive single Parquet and publishes a new local manifest
-only after its volumes are ready. Preparation checks manifest format and volume
-sizes; the model loader continues to check SHA-256 and table integrity. Neither
-script runs `init` or `preprocess`.
-
-Missing source files, malformed manifests, and copy errors identify the task and
-paths in the corresponding batch log. Failed tasks are skipped while later tasks
-continue; the notebook still performs its existing `finally` cleanup. The runtime checkout
-must contain the matching updated script/package before using either notebook's
-new argument.
-
-### When results are written
-
-The settings cell points `RESULT_PATH` to the mounted Drive results directory.
-Batch logs stream to `<RESULT_PATH>/logs/` throughout execution; each successful
-validation publishes its completed run directory there. Report generation also
-uses this root. There is no end-of-run results copy step.
-
-Previously published results remain at the configured destination when a later
-task fails. An interrupted training run may have no completed result directory;
-direct output is not a live checkpoint or a guarantee against interrupted Drive
-writes. Manual builds and the validation notebook require separate preservation
-of production checkpoints under `models/`; the build notebook copies them as
-described below.
-
-The validation notebook's `finally` cleanup calls `drive.flush_and_unmount()`, then
-`runtime.unassign()`, even after validation fails. An error inside cleanup can
-prevent its remaining calls. To continue interactive work,
-change the cleanup behavior before running that cell; after an unmount, later
-Drive operations require mounting again.
-
-### When build outputs are saved
-
-The build notebook sets `BUILD_OUTPUT_PATH` to
-`/content/drive/MyDrive/llm-classification-finetuning/models` by default. This
-notebook-only setting is separate from `MODEL_PATH`, which holds the downloaded
-base weights; it does not change the model CLI's output paths.
-
-After the build batch finishes, its final cell checks `models/SR2_Qwen3_4B/`
-and `models/SR2_Qwen3_4B_lora/` in the runtime and copies each existing
-directory into a single `<BUILD_OUTPUT_PATH>/build-<timestamp>/` backup
-directory (under `SR2_Qwen3_4B/` and/or `SR2_Qwen3_4B_lora/`). This includes
-the frozen `head[_TAG].pt` checkpoint and any LoRA `adapter[_TAG].pt`
-checkpoint, merged backbone, tokenizer, and export metadata present there.
-Historical model directories are not copied. Backups use separate timestamped
-directories; within a batch, multiple untagged builds for the same model still
-replace the same runtime outputs, so the backup retains only that model's final
-on-disk state.
-
-The copy is also attempted after a failed batch to preserve any outputs already
-produced, while retaining the original build error. If neither SR2 directory
-exists, as with a warmup-only run, copying is skipped; warmup caches are already
-written to `CACHE_PATH`. A reused runtime can contain outputs from an earlier
-run, and the backup includes those directories' current contents.
-
-After copying succeeds or is skipped, the cell flushes/unmounts Drive and requests
-runtime release. If copying fails, it reports the error and keeps Drive mounted
-and the runtime available for recovery. A failed copy can leave an incomplete
-backup directory. An error during Drive flushing prevents runtime release.
+- **Data mirror (`DRIVE_DATA_ROOT`):** Batch scripts check each selected YAML's `data.processed_path`, `data.external_rank_path`, and scope supplement locally first. Missing or wrong-sized files/volumes are copied from `DRIVE_DATA_ROOT` (including optional `summary.json` and `token_stats.parquet` for fast budgeting). Local manifests stay authoritative; missing data skips that task and logs the error while remaining tasks continue.
+- **Results:** Because `RESULT_PATH` points to Drive, logs stream to `<RESULT_PATH>/logs/` and completed runs publish directly to Drive. Interrupted runs leave no completed result directory.
+- **Build backups (`BUILD_OUTPUT_PATH`):** Defaults to `/content/drive/MyDrive/llm-classification-finetuning/models`. After the batch (even if a task fails), existing `models/SR2_Qwen3_4B/` and `models/SR2_Qwen3_4B_lora/` directories are copied to `<BUILD_OUTPUT_PATH>/build-<timestamp>/`. Warmup-only runs skip copying. If copying fails, Drive stays mounted and the runtime stays open for recovery; if copying succeeds or is skipped, `finally` unmounts Drive and releases the runtime.
 
 ## Diagnose a failed run
 
-- Read the **first model error** in the streamed output or
-  `<RESULT_PATH>/logs/validate-*.log` or `build-*.log` (default `results/logs/`). The trailing
-  `CalledProcessError` only reports that the child command failed.
-- Check the selected YAML, runtime working directory, and exported environment
-  rather than the local Windows settings.
-- If writing failed, inspect the configured `RESULT_PATH`, Drive mount, and
-  destination permissions. Cleanup can still release the runtime after a model
-  failure; a build-output copy failure leaves it available for recovery.
-
-See [troubleshooting](troubleshooting.md) for CUDA, memory, and input failures.
+- Read the **first model error** in `<RESULT_PATH>/logs/validate-*.log` or `build-*.log` (the trailing `CalledProcessError` is only a wrapper).
+- Verify the selected YAML, runtime cwd, and exported environment (not local Windows `.env`).
+- Check [troubleshooting](troubleshooting.md) for CUDA, memory, and input failures.
