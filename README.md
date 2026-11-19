@@ -14,9 +14,10 @@ use **one CUDA GPU**.
 3. [Validate a model and inspect its report](docs/models.md).
 4. [Build a full-data checkpoint and export the trained backbone](docs/models.md#full-data-builds).
 
-For Colab and the local VS Code notebook workflow, see
-[Colab setup and persistence](docs/colab.md). To submit a build to Kaggle, see
-[Kaggle submission notebook](docs/kaggle-submission.md).
+To run `!validate.ipynb` in the browser, follow the
+[Colab G4 validation workflow](docs/colab.md#run-holdout-validation-on-colab-g4).
+The same guide covers the local VS Code notebook workflow. To submit a build to
+Kaggle, see the [Kaggle submission notebook](docs/kaggle-submission.md).
 
 The default presets select external training rows from the **220,492-row** real
 preference merge using `external_english_rarity_rank.csv`. The selection matches

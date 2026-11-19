@@ -6,6 +6,62 @@ Run project commands inside the Colab runtime, including when VS Code is the
 notebook frontend. Paths such as `/content/...` belong to that runtime; a local
 Windows terminal or local `.env` does not configure its project process.
 
+## Run holdout validation on Colab G4
+
+### Repeat a validation run
+
+1. Open the Drive-hosted `!validate.ipynb` directly from Colab's **Google Drive**
+   or **Recent** tab (under **My Drive → Colab Notebooks**, avoiding duplicate
+   `!validate (N).ipynb` copies) rather than uploading a local file through the
+   browser dialog, which automated browser sessions may block as a protected
+   page. When the local `!validate.ipynb` changes, update the Drive notebook
+   file directly. Reuse **My Drive → llm-classification-finetuning** and wait for
+   all changed or missing `scripts/`, `configs/`, processed data (keeping each
+   multipart manifest with its referenced volumes), and cache files to finish
+   syncing to Drive before starting—including local Google Drive for Desktop
+   uploads into shortcut-linked directories.
+2. Confirm **G4 GPU** in **Runtime → Change runtime type** and save if changed.
+   If the notebook opens stuck in a `Resuming execution` or stale session
+   state, release it first via **Runtime → Disconnect and delete runtime**. Then
+   click **Run all** directly to connect and execute without clicking **Connect**
+   separately beforehand. Approve the Drive mount when prompted; if an OAuth
+   sign-in or consent prompt requires manual interaction, hand browser control to
+   the user. If G4 is unavailable on the first attempt, `SR2-Qwen3-4B`
+   validation or full-data training that trains only the classification head may
+   use **A100 GPU** with **High RAM** off. Release any automatically assigned
+   session before switching, then click **Run all** again. Leave active sessions
+   belonging to other notebooks untouched.
+3. Monitor progress and confirm `Completed N/N tasks.` directly from the
+   Drive-synced `results/logs/validate-*.log` file (either in Drive or in a
+   locally synced `results/logs/` folder) rather than relying on Colab's
+   cross-origin output iframe—which becomes blank or unreadable from the page
+   DOM once the runtime disconnects—or downloading `.ipynb` copies. Confirm in
+   Colab that the notebook's own runtime has released (the status button returns
+   to **Reconnect** and **Disconnect and delete runtime** is disabled), then
+   open the run directories under `results/`.
+
+### First-time Drive setup
+
+Use the project owner's shared link to identify the intended folder.
+
+- **The existing name opens the intended folder.** Reuse the entry.
+- **The name is available.** Add a shortcut to the shared folder directly under
+  **My Drive** with the name `llm-classification-finetuning`.
+- **Another entry uses the name.** Compare its target with the owner's link.
+  Move a confirmed old upload to Drive Trash after its needed files are in the
+  shared folder, then reuse or add the correct shortcut. Resolve any other
+  conflict with the owner before creating an entry.
+
+Keep scripts, configs, processed data, `cache/`, and `Hugging Face/` in the
+shared project folder. Set `DRIVE_DATA_ROOT` in the notebook to
+`/content/drive/MyDrive/llm-classification-finetuning`. Use `scripts/`, `configs/`,
+`cache/`, and `results/` under that root for their respective settings, and
+`Hugging Face/` under the same root for `MODEL_PATH`.
+
+**Agent authorization.** The project owner authorizes the agent to complete this
+workflow using the approved Google account, including syncing project files,
+confirming the Drive mount, and managing the runtime through completion.
+
 ## Set up a runtime checkout
 
 1. Select a CUDA runtime. Validation/build uses one GPU. Choose precision
@@ -34,17 +90,17 @@ Windows terminal or local `.env` does not configure its project process.
 4. Create a `.env` in that runtime checkout, for example:
 
    ```dotenv
-   MODEL_PATH=/content/drive/MyDrive/huggingface
+   MODEL_PATH=/content/drive/MyDrive/Hugging Face
    CACHE_PATH=/content/drive/MyDrive/llm-classification-finetuning/cache
    RESULT_PATH=/content/drive/MyDrive/llm-classification-finetuning/results
    HF_ENDPOINT=https://huggingface.co
    HF_HUB_OFFLINE=1
    ```
 
-   Set Kaggle credentials only if downloading raw files. The saved processed
-   manifest and all volumes from Git are sufficient for model validation.
+   Set Kaggle credentials only if downloading raw files. Configurations that
+   use Git-backed processed data can use the saved artifacts from the checkout.
    Populate `MODEL_PATH` with the complete native Hugging Face cache before
-   running: config, tokenizer, refs/snapshots/blobs, and all weight shards. The
+   running, including the configuration, tokenizer, and all weight shards. The
    separate local `download.ipynb` sets `HF_HUB_OFFLINE=0` for this preparation.
    Execution stays offline and reports any missing required local files instead
    of downloading them. Set offline mode before importing HF libraries; restart
@@ -57,7 +113,7 @@ Windows terminal or local `.env` does not configure its project process.
 
    Or use `uv run python scripts/validate.py` for batch validation, or
    `uv run python scripts/build.py` for batch builds and standalone warmup.
-   Both scripts currently select `configs/3.yaml` through their own constants.
+   Check the model and config selection in the script you are running.
    Editing `config.yaml` does not change a run that selects another YAML.
 
 A notebook's `os.environ` is inherited by subprocesses it launches and overrides
@@ -104,13 +160,14 @@ does not depend on them. Both use four cells:
 | --- | --- |
 | Settings | Define repository/branch, runtime project path, `DRIVE_DATA_ROOT`, `DRIVE_SCRIPTS_DIR`, `DRIVE_CONFIGS_DIR`, model/cache/result paths, endpoint, and `HF_HUB_OFFLINE=1`; export environment settings before HF imports; builds also define `BUILD_OUTPUT_PATH` |
 | Drive | Mount `/content/drive` and create the model-cache directory |
-| Setup | Clone, or fetch and hard-reset the runtime checkout to the selected remote branch; write model/cache/result paths, endpoint, and `HF_HUB_OFFLINE=1` to runtime `.env`; install `uv`; synchronize dependencies |
+| Setup | Shallow-clone or fetch the selected remote branch and check it out with `cache/` excluded; write model/cache/result paths, endpoint, and `HF_HUB_OFFLINE=1` to runtime `.env`; install `uv`; synchronize dependencies |
 | Run and cleanup | First synchronize scripts and configs from Drive; validation then runs `scripts/validate.py --data-source-root DRIVE_DATA_ROOT`, flushes/unmounts Drive and requests runtime release in `finally`; builds run `scripts/build.py --data-source-root DRIVE_DATA_ROOT`, save SR2 build outputs, then perform cleanup |
 
-The setup cell's `git reset --hard` discards tracked edits in the **runtime
-checkout**. Preserve those edits before rerunning that cell. It does not upload
-local Windows project changes; the runtime obtains code from the configured
-remote branch.
+The setup cell forces the checkout of the selected branch in an existing
+**runtime checkout**, discarding tracked edits there. Preserve any edits you
+need before rerunning that cell. The runtime obtains project code from the
+configured remote branch and applies the Drive script and config copies in the
+final cell.
 
 Before each batch, the final cell recursively copies `DRIVE_SCRIPTS_DIR` (default
 `/content/drive/MyDrive/llm-classification-finetuning/scripts`) into
