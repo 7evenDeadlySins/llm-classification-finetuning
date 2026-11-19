@@ -1,9 +1,11 @@
 # Kaggle submission notebook
 
-[Documentation index](../README.md)
+[Documentation index](../README.md) · [Agent upload and submission workflow](kaggle-agent-workflow.md)
 
 [`submit.ipynb`](../submit.ipynb) scores the competition `test.csv` with the model written by
-`model SR2-Qwen3-4B-lora --build` and writes `submission.csv`. It is a **code-competition
+`model SR2-Qwen3-4B-lora --build` (`adapter.pt` + `merged/`) or `model SR2-Qwen3-4B --build`
+(`head.pt` paired with the frozen `Skywork/Skywork-Reward-V2-Qwen3-4B` backbone) and writes
+`submission.csv`. It is a **code-competition
 notebook**: it is self-contained, runs offline, and does not import this package. Its
 runtime target is GPU T4 x2 with Python **3.13 or newer**;
 installed inference dependencies must also support the kernel's Python version.
@@ -18,9 +20,11 @@ base runtime constraints, and the SDPA/Qwen3 interfaces used by the notebook. De
 installation runs in the upload workflow before notebook execution; the inference
 cells check and use that prepared environment offline.
 
-## Prepare the model dataset
+## Prepare the model inputs
 
-Upload a Kaggle Dataset containing the two build outputs (`models/SR2_Qwen3_4B_lora/`):
+Attach Kaggle Models or Datasets containing either:
+
+- A LoRA build (`models/SR2_Qwen3_4B_lora/`):
 
 ```text
 SR2_Qwen3_4B_lora/
@@ -32,16 +36,23 @@ SR2_Qwen3_4B_lora/
     └── model-00001-of-00002.safetensors, model-00002-of-00002.safetensors
 ```
 
-Only `adapter.pt`'s `head_state_dict` is used; the LoRA weights are already merged into
-`merged/`. Files downloaded from Drive as split archives (`*-001.zip`, shards named
+- Or a frozen-backbone build (`models/SR2_Qwen3_4B/head.pt`) paired with a separate
+  `Skywork/Skywork-Reward-V2-Qwen3-4B` snapshot directory (`config.json`, tokenizer files,
+  and safetensor weights; `model.` parameter prefixes and `score.*` keys are handled
+  automatically when streaming weights).
+
+Only `adapter.pt`'s or `head.pt`'s `head_state_dict` is used; for LoRA builds the LoRA
+weights are already merged into `merged/`. Files downloaded from Drive as split archives (`*-001.zip`, shards named
 `model-0000X-of-00002-00Y.safetensors`) must be unzipped first. The notebook tolerates the
 `-00Y` shard suffix by symlinking to the names in the index, but it does not unzip parts.
 
-Set `MODEL_DIR` in the configuration block **below the startup diagnostics in the first
-code cell**. If that path does not exist, `/kaggle/input` is searched for an `adapter.pt`
-beside a `merged/config.json`. The notebook accepts the SR2 v10 and v9 head
+Set `MODEL_DIR` and `BASE_MODEL_DIR` in the configuration block **below the startup diagnostics in the first
+code cell**. If `MODEL_DIR` does not exist, `/kaggle/input` is searched first for an `adapter.pt`
+beside a `merged/config.json`, and otherwise for a `head.pt` paired with `BASE_MODEL_DIR`
+(falling back to `/kaggle/input` for the frozen base snapshot while skipping any `merged/`
+beside `adapter.pt`). The notebook accepts the SR2 v10 and v9 head
 markers and checks hidden sizes and backbone pairing. When `export_metadata.json`
-is present, its checksum must match `adapter.pt`.
+is present for a LoRA build, its checksum must match `adapter.pt`.
 The head uses subtractive cross-projected wins and their nonnegative clamped
 GELU activations `C_A` and `C_B`, followed by
 `z_tie = tie_bias + (C_A + C_B - t * abs(C_A - C_B)) @ u_eff`.

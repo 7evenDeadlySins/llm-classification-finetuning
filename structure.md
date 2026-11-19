@@ -9,7 +9,7 @@ focused classes. Prefer package public exports to private cross-package helpers.
 | Document | Owns |
 | --- | --- |
 | [README.md](README.md) | Overview, active profiles, and navigation |
-| [docs/getting-started.md](docs/getting-started.md), [docs/colab.md](docs/colab.md), [docs/kaggle-submission.md](docs/kaggle-submission.md) | Local/remote setup, operational workflows, and the Kaggle submission notebook |
+| [docs/getting-started.md](docs/getting-started.md), [docs/colab.md](docs/colab.md), [docs/kaggle-submission.md](docs/kaggle-submission.md), [docs/kaggle-agent-workflow.md](docs/kaggle-agent-workflow.md) | Local/remote setup, operational workflows, agent publish/submit guide, and the Kaggle submission notebook |
 | [docs/commands.md](docs/commands.md), [docs/configuration.md](docs/configuration.md) | CLI behavior, field definitions, defaults, path rules, and batch experiments |
 | [docs/data-preparation.md](docs/data-preparation.md), [docs/external-training-data.md](docs/external-training-data.md), [docs/recommended-external-data.md](docs/recommended-external-data.md), [docs/models.md](docs/models.md), [docs/lora.md](docs/lora.md) | Data/model behavior, candidate external datasets, and training algorithms |
 | [docs/caching.md](docs/caching.md), [docs/reports.md](docs/reports.md) | Cache identities/APIs, artifacts, reporting, and measurements |
@@ -110,10 +110,11 @@ to the batch script; complete local processed data bypasses that source.
 
 [submit.ipynb](submit.ipynb) is the tracked, self-contained Kaggle inference notebook (GPU
 T4 x2, Python 3.13+, offline inference after upload-time dependency setup). It sits
-outside the package and the `model` CLI: it reads the build's
-`adapter.pt` head and `merged/` backbone and writes `submission.csv`. It duplicates the
-SR2 head and the conversation serializer. Mirror changes to the head or the
-conversation serialization format there.
+outside the package and the `model` CLI: it reads either a merged LoRA build's
+`adapter.pt` head and `merged/` backbone or a frozen SR2 `head.pt` checkpoint paired
+with the base `Skywork/Skywork-Reward-V2-Qwen3-4B` backbone directory (`BASE_MODEL_DIR`)
+and writes `submission.csv`. It duplicates the SR2 head and the conversation serializer.
+Mirror changes to the head or the conversation serialization format there.
 Behavior belongs in [Kaggle submission](docs/kaggle-submission.md).
 
 ## Package map
@@ -252,7 +253,7 @@ defaults to `./results` and controls validation, report, and log roots.
 | `<RESULT_PATH>/comprehensive/` | Latest synthesized report pair |
 | `<RESULT_PATH>/logs/validate-*.log` | Immediately flushed batch-run logs, including failures |
 | `<RESULT_PATH>/logs/build-*.log` | Immediately flushed full-data build and standalone warmup batch logs, including failures |
-| `<BUILD_OUTPUT_PATH>/build-<timestamp>/SR2_Qwen3_4B_lora/` | Build notebook's Drive backup of current SR2 outputs; notebook-only destination |
+| `<BUILD_OUTPUT_PATH>/build-<timestamp>/SR2_Qwen3_4B/` and `.../SR2_Qwen3_4B_lora/` | Build notebook's Drive backup of existing current SR2 outputs; notebook-only destination |
 
 Runtime artifact directories are not source modules. The saved default split
 and selected shared caches are tracked with regular Git storage; raw data,

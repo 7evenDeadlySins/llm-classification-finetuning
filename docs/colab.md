@@ -129,7 +129,7 @@ environment changes; configure that terminal's process or the runtime `.env`.
 | `CACHE_PATH` on mounted Drive | Token, embedding, batch-plan, and warmup caches publish when those stages complete | Directly to Drive; unchanged hits do not republish |
 | `RESULT_PATH` on mounted Drive | Batch logs stream during execution; completed model runs publish predictions, metrics, and YAML; comprehensive reports use their subdirectory | Directly to Drive |
 | `PROJECT_DIR/models/` | `--build` publishes adapter/head and the merged backbone directory | Runtime-local until copied separately |
-| `BUILD_OUTPUT_PATH` in `!build.ipynb` | Copy the current SR2 build directory after the batch finishes, including after a failed batch | Timestamped backup on Drive before runtime release |
+| `BUILD_OUTPUT_PATH` in `!build.ipynb` | Copy existing current SR2 build directories (`models/SR2_Qwen3_4B/`, `models/SR2_Qwen3_4B_lora/`) after the batch finishes, including after a failed batch | Timestamped backup on Drive before runtime release |
 
 Setting a path does not copy existing files. Point `CACHE_PATH` and `RESULT_PATH`
 to Drive to publish their artifacts there during the run. When `RESULT_PATH` is
@@ -242,19 +242,22 @@ The build notebook sets `BUILD_OUTPUT_PATH` to
 notebook-only setting is separate from `MODEL_PATH`, which holds the downloaded
 base weights; it does not change the model CLI's output paths.
 
-After the build batch finishes, its final cell copies the runtime's current
-`models/SR2_Qwen3_4B_lora/` directory to
-`<BUILD_OUTPUT_PATH>/build-<timestamp>/SR2_Qwen3_4B_lora/`. This includes the
-adapter/head checkpoint, merged backbone, tokenizer, and export metadata that
-exist there. Historical model directories are not copied. Backups use separate
-timestamped directories; within a batch, multiple untagged builds still replace
-the same runtime outputs, so the backup retains their final on-disk state.
+After the build batch finishes, its final cell checks `models/SR2_Qwen3_4B/`
+and `models/SR2_Qwen3_4B_lora/` in the runtime and copies each existing
+directory into a single `<BUILD_OUTPUT_PATH>/build-<timestamp>/` backup
+directory (under `SR2_Qwen3_4B/` and/or `SR2_Qwen3_4B_lora/`). This includes
+the frozen `head[_TAG].pt` checkpoint and any LoRA `adapter[_TAG].pt`
+checkpoint, merged backbone, tokenizer, and export metadata present there.
+Historical model directories are not copied. Backups use separate timestamped
+directories; within a batch, multiple untagged builds for the same model still
+replace the same runtime outputs, so the backup retains only that model's final
+on-disk state.
 
 The copy is also attempted after a failed batch to preserve any outputs already
-produced, while retaining the original build error. If no SR2 directory exists,
-as with a warmup-only run, copying is skipped; warmup caches are already written
-to `CACHE_PATH`. A reused runtime can contain outputs from an earlier run, and
-the backup includes the directory's current contents.
+produced, while retaining the original build error. If neither SR2 directory
+exists, as with a warmup-only run, copying is skipped; warmup caches are already
+written to `CACHE_PATH`. A reused runtime can contain outputs from an earlier
+run, and the backup includes those directories' current contents.
 
 After copying succeeds or is skipped, the cell flushes/unmounts Drive and requests
 runtime release. If copying fails, it reports the error and keeps Drive mounted

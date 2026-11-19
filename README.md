@@ -77,6 +77,7 @@ their historical artifacts are described in [migration](docs/migration.md).
 | [Getting started](docs/getting-started.md) | Install dependencies, choose saved or raw data, and run a first validation |
 | [Colab](docs/colab.md) | Set remote paths, persist caches, and understand result copying and shutdown |
 | [Kaggle submission](docs/kaggle-submission.md) | Prepare the model dataset, configure and run the offline T4 x2 submission notebook |
+| [Kaggle agent workflow](docs/kaggle-agent-workflow.md) | End-to-end agent guide for publishing models to Kaggle (local/Colab) and submitting |
 | [Commands](docs/commands.md) | Select modes, checkpoints, cache refresh, and batch validation |
 | [Configuration](docs/configuration.md) | Look up YAML fields, defaults, paths, GPU settings, and token budgets |
 | [Data preparation](docs/data-preparation.md) | Understand grouping, balancing, original-only rows, and the processed schema |
