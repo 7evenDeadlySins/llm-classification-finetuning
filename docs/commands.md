@@ -185,9 +185,10 @@ model CLI directly with tags when separate checkpoints are needed.
 ### Shared batch behavior
 
 Each script selects work independently through its top-level `CONFIG_DIR` and
-`MODEL_CONFIGS` constants. Validation currently selects `SR2-Qwen3-4B-lora`
-with `1.yaml`; builds select frozen and LoRA SR2 with `1.yaml` from
-`configs/`. Edit these constants to choose other combinations;
+`MODEL_CONFIGS` constants. Currently, `scripts/validate.py` selects
+`SR2-Qwen3-4B` with `l1.yaml`–`l4.yaml`, and `scripts/build.py` selects
+`SR2-Qwen3-4B-lora` with `l1.yaml` from `configs/`. Edit these constants to
+choose other combinations;
 there are no script CLI selection flags. Dictionary keys are registered model
 selectors, with `warmup` additionally supported by the build script. Each list
 contains filenames relative to `CONFIG_DIR`, resolved from the script's project

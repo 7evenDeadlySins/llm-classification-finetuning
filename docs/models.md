@@ -100,8 +100,8 @@ uv run model SR2-Qwen3-4B-lora
 SR2 loads `Skywork/Skywork-Reward-V2-Qwen3-4B` through `AutoModel`, discards its
 scalar reward head, and trains LoRA plus a
 [swap-equivariant three-class head](lora.md#swap-equivariant-head). It uses the
-aligned conversation serializer and last-real-token pooling, without a chat
-template or regenerating the split. Training uses original rows and produces
+aligned [SR2 chat-template serializer](data-preparation.md#conversation-serialization)
+and last-real-token pooling without regenerating the split. Training uses original rows and produces
 one prediction per ID; `A/B_swap` is rejected. Its model, checkpoint,
 warmup-cache, and result namespace is SR2. See [LoRA training](lora.md).
 

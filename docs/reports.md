@@ -5,7 +5,9 @@
 A successful holdout validation publishes one timestamped directory containing
 `validation.csv`, `metrics.json`, and `config.yaml`. Builds do not produce
 validation reports. Files are staged and exposed together after
-training succeeds; predictions come from the final epoch.
+training succeeds; LoRA validation predictions come from the final epoch, whereas
+frozen `SR2-Qwen3-4B` publishes predictions from `best_epoch` (the lowest
+unsmoothed validation loss).
 
 ## Generate a report
 

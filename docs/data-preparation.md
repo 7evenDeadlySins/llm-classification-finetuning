@@ -280,9 +280,8 @@ when configured.
 ### External non-tie downsampling
 
 Executed on 2026-11-18 and published to
-`data/processed/external_merged_downsampled/`
-([summary](../data/processed/external_merged_downsampled/summary.json)). The
-figures below match the
+`data/processed/external_merged_downsampled/` (`summary.json`; historical snapshot not
+retained in the current workspace). The figures below match the
 [220,492-row real merge](../data/processed/external_merged/summary.json)
 (reconstructed SHA-256
 `9c1f041dc3cdfc63a8a924b9433d124da4905d93d5e40e4e03bcc03eeb993bc6`, 63,168 ties).
@@ -341,7 +340,7 @@ raises its tie share to 67.66%.
 
 The execution recorded the source fingerprint (`9c1f041dc3cdfc63a8a924b9433d124da4905d93d5e40e4e03bcc03eeb993bc6`)
 and all 16,382 ranked deletion IDs with their sort keys in
-[`ranked_deletions.parquet`](../data/processed/external_merged_downsampled/ranked_deletions.parquet),
+`data/processed/external_merged_downsampled/ranked_deletions.parquet`,
 published the filtered rows in their original order to
 `data/processed/external_merged_downsampled/`, and verified 192,615 training
 rows, the same 11,495 frozen Kaggle validation IDs, all 57,477 original Kaggle
@@ -579,11 +578,12 @@ rows without rebuilding either split.
 | `data/processed/train_validation.parquet` | 59,533 | 59,533 | 47,626 | 11,907 |
 | `data/processed/lmsys33k/train_validation.parquet` | 77,527 | 77,527 | 66,032 | 11,495 |
 
-Both artifacts are now below 100 MiB and use a single Parquet file. Their current
-SHA-256 fingerprints are:
+At that 2026-11-12 cleanup snapshot, both artifacts were below 100 MiB and used a single Parquet file with SHA-256 fingerprints:
 
 - Repository-backed snapshot: `0591f630f6208081eeeffdd4776122ea3bb806a3aff7c9e0809e3eaedae38134`.
-- Kaggle + LMSYS snapshot: `0488ff2b22153bc5e1f05d0dad030906936ee0f3a8677e9ac646ebbb7ca33ecc`.
+- Pre-supplement Kaggle + LMSYS snapshot (`77,527` rows): `0488ff2b22153bc5e1f05d0dad030906936ee0f3a8677e9ac646ebbb7ca33ecc`.
+
+On 2026-11-19, `data/processed/lmsys33k/train_validation.parquet` was supplemented in place with 1,013 ranked real Arena ties to **78,540** total rows (**67,045** train, **11,495** validation; tie share 30.94856%), and is now stored in multipart form via `train_validation.parquet.manifest.json` (two `.part` files totaling `139,776,522` bytes; reconstructed SHA-256 `43eb5997d47e289babfec94f3732cee1762ca0dbd8392ed4dd1f3a9edea7b885`). See the [LMSYS33K data notes](../data/processed/lmsys33k/README.md).
 
 Existing token and feature caches remain compatible when their branch content
 and other identities match. SR2 already trained and predicted on original rows;

@@ -168,7 +168,8 @@ startup diagnostics in the first code cell.
   reported in the final warning. The BF16 weights are narrowed to FP16, so overflow is the
   main numerical risk of T4 inference.
 - **Very long inputs:** nothing is truncated; Qwen3's trained position limit is 40,960
-  tokens, and the longest training branch is 13,866.
+  tokens (the longest training branch is 13,866 in the Kaggle-only baseline,
+  up to 35,130 in `lmsys33k`, and up to 40,384 in ranked `external_merged`).
 - **Duplicated code.** The notebook copies the SR2 head and the conversation serializer.
   When either changes in the package, change the notebook too.
 

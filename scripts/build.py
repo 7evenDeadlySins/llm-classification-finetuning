@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 CONFIG_DIR = "configs"
 MODEL_CONFIGS: dict[str, list[str]] = {
-	# "SR2-Qwen3-4B": ["l3.yaml"],
+	# "SR2-Qwen3-4B": ["l2.yaml"],
 	# "warmup": ["1.yaml"],
 	"SR2-Qwen3-4B-lora": ["l1.yaml"],
 }

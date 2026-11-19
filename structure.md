@@ -380,8 +380,8 @@ present in a fresh checkout.
    scheduler/optimizer/model state. See
    [batching](docs/lora.md#optional-token-budget-training-batches).
 8. **Precision:** trainable adapter/head parameters, gradients, and AdamW moments
-   stay FP32. BF16 features/head autocast and FP32 logits retain the documented
-   policy. BF16 LoRA input dtype upcasting is disabled once after adapter
+   stay FP32. BF16 features, explicit BF16 win computation (with head autocast
+   disabled), and FP32 tie/logit arithmetic retain the documented policy. BF16 LoRA input dtype upcasting is disabled once after adapter
    initialization for the model instance; forward and checkpoint recomputation
    do not traverse the model to change that policy. Evaluation disables gradient
    checkpointing. See [precision](docs/lora.md#hardware-and-input-limits).

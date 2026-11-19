@@ -28,7 +28,7 @@ With the current ranking, validation training and standalone warmup add
 rows** to all **57,477 Kaggle rows**. See
 [ranked external selection](docs/data-preparation.md#ranked-external-training-selection).
 
-The [LMSYS33K preset](configs/lmsys33k.yaml) uses the original Kaggle + LMSYS
+The LMSYS33K presets ([`configs/l1.yaml`](configs/l1.yaml)–[`l8.yaml`](configs/l8.yaml)) use the original Kaggle + LMSYS
 snapshot with 1,013 real Arena ties added in English rarity rank order. Both
 validation training (67,045 rows) and full-data builds (78,540 rows) reach a
 30.95% tie share. The validation workflow evaluates on the same 11,495 frozen

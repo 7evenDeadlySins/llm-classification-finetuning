@@ -56,7 +56,7 @@ $R,u,u_{\mathrm{eff}}\in\mathbb{R}^{h\times 1}$. PyTorch stores the transposed
 linear weights. Raw parameter `u` has shape `[1, h]`, and scalar
 `tie_bias` is unconstrained. The effective weights $u_{\mathrm{eff}}$ are positive.
 The top-level YAML coefficient $t$ is fixed throughout training and defaults to
-$2\phi+1=2+\sqrt{5}$, where $\phi$ is the golden ratio.
+$2\phi-1=\sqrt{5}$, where $\phi$ is the golden ratio.
 L/M/R are sampled independently from zero-mean uniform
 distributions $U(-\sqrt{3}\sigma,\sqrt{3}\sigma)$ with these standard deviations:
 
@@ -94,11 +94,14 @@ the R readout operate on both win branches together.
 
 There are three linear calls: the packed L/M projection, the shared win readout,
 and the tie readout. The former A-B and L+M tie projection is removed.
-All head parameters remain FP32. The win computation follows the existing head
-mixed-precision policy and converts its logits to FP32. With autocast disabled,
-the tie branch converts masked wins to FP32 before clamping and computes the
-sum, absolute difference, effective weights, $t$, and final linear readout in
-FP32. Gradients flow through `u`, `tie_bias`, and the reused wins.
+All head parameters remain FP32. The entire head forward pass runs with autocast
+disabled (`torch.autocast(..., enabled=False)`). When `compute_dtype` is
+`bfloat16`, the head explicitly casts its input activations and win projection/readout
+tensors (`input_projection.weight`, `win_projection_bias`, `win_readout.weight`)
+to `bfloat16` and converts the resulting win logits to FP32; otherwise it runs
+without BF16 casting. The tie branch converts masked wins to FP32 before clamping
+and computes the sum, absolute difference, effective weights, $t$, and final linear
+readout in FP32. Gradients flow through `u`, `tie_bias`, and the reused wins.
 Returned logits remain FP32 in the order A-win, B-win, tie.
 
 Checkpoints save `u`, `tie_bias`, and the FP32 `t` buffer alongside L/M/R
@@ -142,7 +145,7 @@ rebuilding.
 
 | Precision | Backbone / pooled CPU features | Trainable state and head computation |
 | --- | --- | --- |
-| `bf16` | BF16 residuals, checkpoint inputs, and features | FP32 parameters, gradients, and AdamW moments; BF16 head autocast; FP32 logits |
+| `bf16` | BF16 residuals, checkpoint inputs, and features | FP32 parameters, gradients, and AdamW moments; autocast disabled, explicit BF16 win compute, FP32 tie/logits |
 | `fp16` | FP16 backbone compute; FP32 pooled features | FP32 head/state with gradient scaling |
 | `fp32` | FP32 | FP32 head/state |
 
