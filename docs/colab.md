@@ -8,10 +8,14 @@ Run project commands inside the Colab runtime (including when VS Code is the fro
 
 ### Repeat a validation run
 
-1. Open the Drive-hosted `!validate.ipynb` from Colab's **Google Drive** or **Recent** tab (under **My Drive → Colab Notebooks**, avoiding duplicate `!validate (N).ipynb` copies) rather than uploading via a browser dialog. Update the Drive file directly when local `!validate.ipynb` changes. Reuse **My Drive → llm-classification-finetuning** and wait for `scripts/`, `configs/`, processed data (keeping each manifest with its `.parts/`), and caches to finish syncing before starting.
-2. Select **G4 GPU** in **Runtime → Change runtime type**. If stuck in `Resuming execution` or a stale session, release it via **Runtime → Disconnect and delete runtime**, then click **Run all** directly (without clicking **Connect** first). Approve the Drive mount when prompted; hand browser control to the user for any manual OAuth/consent prompt.
-   - If G4 is unavailable, head-only `SR2-Qwen3-4B` validation or builds may use **A100 GPU** with **High RAM** off. Release any auto-assigned session before switching, then click **Run all**. Leave other notebooks' sessions untouched.
-3. Monitor progress and confirm `Completed N/N tasks.` in the Drive-synced `results/logs/validate-*.log` (rather than Colab's cross-origin output iframe, which blanks after disconnect). Confirm the runtime has released (**Reconnect** shown, **Disconnect and delete runtime** disabled) before opening `results/`.
+Assume the Drive-hosted workspace (`My Drive → Colab Notebooks` and `My Drive → llm-classification-finetuning`) is already synced unless the user says local files changed or a run fails with stale or missing inputs. Do not inspect `README.md`, `structure.md`, `configs/`, or `scripts/validate.py`, and do not list, search, download, or diff Google Drive files (`!validate.ipynb`, `scripts/`, `configs/`, processed data, caches, or `Hugging Face/`) to verify local-to-Drive consistency beforehand.
+
+1. Open `https://colab.research.google.com/` directly. If no Google session is active, pause immediately and hand browser control to the user to sign in before taking any other step.
+2. From Colab's **Google Drive** or **Recent** tab, open `!validate.ipynb` under **My Drive → Colab Notebooks** rather than uploading through a browser dialog (avoiding duplicate `!validate (N).ipynb` copies). Only update the Drive file directly when local `!validate.ipynb` was explicitly changed, and let any active local Drive sync finish before relying on newly edited `scripts/`, `configs/`, processed data (keeping each manifest with its `.parts/`), or caches.
+3. Select **G4 GPU** in **Runtime → Change runtime type** and let Colab fall back automatically if G4 is unavailable. If Colab assigns a non-G4 runtime, inspect `scripts/validate.py` (`MODEL_CONFIGS`) at that point: head-only `SR2-Qwen3-4B` validation or builds may continue on any Colab-assigned GPU fallback (not necessarily **A100 GPU**) as long as it is not **CPU** (keep **High RAM** off if switching manually), whereas LoRA runs require **G4 GPU**. Release any disallowed fallback (such as **CPU**) rather than running on it.
+4. Leave other notebooks' sessions untouched. If this notebook is stuck in `Resuming execution` or attached to a stale session, release it via **Runtime → Disconnect and delete runtime**, then click **Run all** directly (without clicking **Connect** first).
+5. Approve Colab's in-page Drive mount dialog when prompted. If Google OAuth/consent requires manual interaction or Drive mounting fails with `credential propagation was unsuccessful`, pause and hand browser control to the user.
+6. Once the final cell logs `Saving validation log to ...` and launches `scripts/validate.py`, avoid polling Colab's cross-origin output iframe (which blanks after disconnect) or making repeated Drive API listings that risk rate limits. Confirm `Completed N/N tasks.` in the Drive-synced `results/logs/validate-*.log` and verify the runtime has released (**Reconnect** shown, **Disconnect and delete runtime** disabled) before opening `results/`.
 
 ### First-time Drive setup
 
@@ -22,7 +26,7 @@ Identify the shared folder from the project owner's link:
 
 Keep `scripts/`, `configs/`, processed data, `cache/`, and `Hugging Face/` in the shared folder, with `DRIVE_DATA_ROOT=/content/drive/MyDrive/llm-classification-finetuning` (and `MODEL_PATH` pointing to `Hugging Face/`).
 
-**Agent authorization:** The project owner authorizes the agent to complete this workflow using the approved Google account, including syncing files, confirming Drive mount, and managing the runtime through completion.
+**Agent authorization:** The project owner authorizes the agent to complete this workflow using the approved Google account, including opening the Drive notebook, approving in-page Drive mount prompts, managing the runtime through completion, and reading completion logs; only upload or audit Drive files when explicitly requested or when diagnosing a failure.
 
 ## Set up a manual runtime checkout
 
@@ -95,4 +99,5 @@ The Git-ignored `!validate.ipynb` and `!build.ipynb` each have four cells:
 
 - Read the **first model error** in `<RESULT_PATH>/logs/validate-*.log` or `build-*.log` (the trailing `CalledProcessError` is only a wrapper).
 - Verify the selected YAML, runtime cwd, and exported environment (not local Windows `.env`).
+- Check Drive sync state (`scripts/`, `configs/`, processed data manifests with `.parts/`, caches, and `Hugging Face/`) only when the log reports missing, outdated, or mismatched files.
 - Check [troubleshooting](troubleshooting.md) for CUDA, memory, and input failures.

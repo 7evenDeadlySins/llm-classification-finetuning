@@ -15,10 +15,11 @@ For browser-based Colab runs (`!validate.ipynb`), see the [Colab G4 validation w
 
 ## Datasets and presets
 
-- **Default presets** (`config.yaml`, `configs/1.yaml`–`7.yaml`): Select external rows from the **220,492-row** real preference merge (`Kaggle + LMSYS + Arena human + Arena expert`, hard labels, 40,960-token context limit) using `external_english_rarity_rank.csv` to match Kaggle token volume and tie share.
+- **Default root preset** (`config.yaml`): Selects external rows from the **220,492-row** real preference merge (`Kaggle + LMSYS + Arena human + Arena expert`, hard labels, 40,960-token context limit) using `external_english_rarity_rank.csv` to match Kaggle token volume and tie share.
   - Validation / standalone warmup: **45,982 Kaggle + 6,658 external** train rows, evaluated on **11,495 frozen Kaggle validation rows**.
   - Full-data builds: **57,477 Kaggle + 8,934 external** train rows.
   - See [ranked external selection](docs/data-preparation.md#ranked-external-training-selection) and [merged external preferences](docs/data-preparation.md#merged-external-preferences).
+- **Full `external_merged` presets** (`configs/1.yaml`–`7.yaml`): Use all **220,492 rows** of `data/processed/external_merged/train_validation.parquet` (`external_rank_path: null`: **208,997** train rows evaluated on **11,495** frozen Kaggle validation rows; **220,492** rows for full-data builds).
 - **LMSYS33K presets** (`configs/l1.yaml`–`l8.yaml`): Use the Kaggle + LMSYS snapshot supplemented with 1,013 ranked Arena ties (30.95% tie share; 67,045 train rows for validation, 78,540 for builds) against the same 11,495 validation rows. See [LMSYS33K data notes](data/processed/lmsys33k/README.md).
 - **Data tools** in [data/](data/): [external-data merger](data/merge_external_data.py), [synthetic tie generator](data/generate_synthetic_tie.py), and [tie duplicate generator](data/generate_tie_duplicate.py). Both `train_supplement_path` and `build_supplement_path` are currently `null` in all presets.
 

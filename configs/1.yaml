@@ -1,4 +1,4 @@
-# Match ranked external preferences to the Kaggle training rows in each scope.
+# Use all saved external_merged real preference rows.
 # Synthetic ties and tie duplication are temporarily excluded.
 # Counts, source revisions and checksums: data/processed/external_merged/summary.json
 
@@ -6,7 +6,7 @@ data:
   competition: llm-classification-finetuning
   raw_dir: data/raw
   processed_path: data/processed/external_merged/train_validation.parquet
-  external_rank_path: data/processed/external_english_rarity_rank.csv
+  external_rank_path: null
   train_supplement_path: null
   build_supplement_path: null
 

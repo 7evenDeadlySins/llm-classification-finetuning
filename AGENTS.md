@@ -1,12 +1,13 @@
+# Project Instructions
+
 ## Logic Structure
 
-Follow the project structure and module responsibilities defined in structure.md.
-You may update this file when the project structure changes.
+Update structure.md for project structure and module responsibilities.
 You may split detailed documentation into /docs as the complexity grows.
 
 ## Code Style
 
-Modify code only when I explicitly ask.
+Modify code only when I ask.
 Follow the OOP principle if applicable.
 Follow the project’s architecture and conventions.
 Run `ruff format` on each Python file after editing it.
